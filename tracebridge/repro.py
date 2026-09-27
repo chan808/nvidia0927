@@ -51,6 +51,8 @@ def _run(path: Path, candidate_fix: bool) -> dict:
     if path.parent.resolve() != GENERATED.resolve() or path.name not in {f"test_{name}.py" for name in TEMPLATES}:
         raise ValueError("Only generated demo tests can run")
     env = os.environ.copy()
+    env.pop("NVIDIA_API_KEY", None)
+    env.pop("OPENAI_API_KEY", None)
     env["TRACEBRIDGE_CANDIDATE_FIX"] = "1" if candidate_fix else "0"
     env["PYTHONPATH"] = str(ROOT)
     try:
@@ -77,6 +79,6 @@ def demonstrate_red_green(diagnosis_type: str) -> dict:
         "test_source": path.read_text(encoding="utf-8"),
         "before": before,
         "after_candidate_fix": after,
-        "verified_in_demo": before["exit_code"] != 0 and after["exit_code"] == 0,
+        "verified_in_demo": before["exit_code"] == 1 and "1 failed" in before["output"] and after["exit_code"] == 0,
         "note": "This verifies only the disposable sample app/database, not a production fix.",
     }

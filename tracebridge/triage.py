@@ -90,3 +90,24 @@ def analyze(trace_id: str, claim: str) -> dict[str, Any]:
 
     result["next_action"] = "현재 증거만으로 원인을 정할 수 없습니다. 같은 요청의 상세 로그 또는 재현 절차를 추가하세요."
     return result
+
+
+def summarize(result: dict[str, Any]) -> str:
+    """Use verified verdict fields, never unvalidated model prose, for the user summary."""
+    if "observed_status" not in result:
+        return "요청을 식별하지 못했습니다. trace ID, 환경, 발생 시각을 확인해 주세요."
+
+    reported = result["reported_status"]
+    observed = result["observed_status"]
+    if reported is None:
+        claim_line = f"실제 응답은 HTTP {observed}입니다. 제보에 상태 코드가 없어 일치 여부는 판단할 수 없습니다."
+    else:
+        agreement = "일치" if result["claim_status"] == "MATCHED" else "불일치"
+        claim_line = f"제보 HTTP {reported}, 실제 HTTP {observed}: {agreement}."
+
+    finding = {
+        "contract_mismatch": "요청의 user_id와 계약·DTO의 userId가 다릅니다.",
+        "migration_missing": "백엔드의 phone 컬럼 오류와 DB V11 / 코드 V12 상태가 확인됐습니다.",
+        "expected_validation": "이 요청에서는 필수 필드 누락에 따른 HTTP 400이 확인됐습니다.",
+    }.get(result["diagnosis_type"], "현재 자료로는 원인을 확정할 수 없습니다.")
+    return f"{claim_line} {finding} 재현 테스트는 아직 실행하지 않았습니다."

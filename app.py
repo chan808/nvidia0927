@@ -18,12 +18,13 @@ options["증거 부족 · unknown"] = "unknown"
 selected = st.selectbox("데모 사례", list(options))
 trace_id = options[selected]
 case = get_case(trace_id)
-claim = st.text_input("오류 제보", value=case["claim"] if case else "회원가입 API에서 500이 납니다")
-st.text_input("Trace ID", value=trace_id, disabled=True)
 if st.session_state.get("selected_trace_id") != trace_id:
     st.session_state.selected_trace_id = trace_id
+    st.session_state.report_claim = case["claim"] if case else "회원가입 API에서 500이 납니다"
     st.session_state.analysis = None
     st.session_state.repro = None
+claim = st.text_input("오류 제보", key="report_claim")
+st.text_input("Trace ID", value=trace_id, disabled=True)
 
 live_ready = has_api_key()
 mode = st.radio(
@@ -54,7 +55,14 @@ if analysis:
     c1.metric("제보 확인", verdict["claim_status"])
     c2.metric("원인 근거", verdict["finding_status"])
     repro = st.session_state.get("repro")
-    repro_status = "CANDIDATE_FIX_PASSED" if repro and repro["verified_in_demo"] else verdict["repro_status"]
+    if repro and repro["verified_in_demo"]:
+        repro_status = "CANDIDATE_FIX_PASSED"
+    elif repro and repro["before"]["exit_code"] == 1:
+        repro_status = "REPRODUCED"
+    elif repro:
+        repro_status = "NOT_REPRODUCED"
+    else:
+        repro_status = verdict["repro_status"]
     c3.metric("재현", repro_status)
     st.write(f"**분류:** {verdict['diagnosis_type']}")
     st.write(f"**다음 조치:** {verdict['next_action']}")
@@ -69,12 +77,13 @@ if analysis:
             st.markdown(f"**{step['tool']}** — {step['reason']}")
             st.json(step["result"])
     if analysis["agent_message"]:
-        st.subheader("모델 설명")
+        st.subheader("검증된 요약")
         st.write(analysis["agent_message"])
 
     if verdict["repro_eligible"]:
         if st.button("재현 테스트 생성·실행"):
             st.session_state.repro = demonstrate_red_green(verdict["diagnosis_type"])
+            st.rerun()
         if repro:
             st.subheader("수정 전후 검증 · 격리된 샘플 환경")
             st.code(repro["test_source"], language="python")
