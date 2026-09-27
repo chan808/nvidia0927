@@ -1,0 +1,16 @@
+{
+  "trace": {
+    "trace_id": "orders-staging-001",
+    "environment": "staging",
+    "service": "orders-api",
+    "version": "r42",
+    "method": "POST",
+    "path": "/api/orders",
+    "operation": "주문생성",
+    "response_status": 500
+  },
+  "logs": [
+    "INFO request started",
+    "ValueError: invalid order state for private@example.invalid"
+  ]
+}

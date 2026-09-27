@@ -11,7 +11,7 @@ from tracebridge.repro import demonstrate_red_green
 
 st.set_page_config(page_title="TraceBridge", page_icon="🔎", layout="wide")
 st.title("🔎 TraceBridge")
-st.caption("프론트 오류 제보를 단일 요청의 증거와 재현 테스트로 바꾸는 데모")
+st.caption("제보가 있거나 없는 합성 API 사건의 증거를 조사하는 데모")
 
 options = {f"{title} · {trace_id}": trace_id for trace_id, title in list_cases()}
 options["증거 부족 · unknown"] = "unknown"
@@ -23,7 +23,15 @@ if st.session_state.get("selected_trace_id") != trace_id:
     st.session_state.report_claim = case["claim"] if case else "회원가입 API에서 500이 납니다"
     st.session_state.analysis = None
     st.session_state.repro = None
-claim = st.text_input("오류 제보", key="report_claim")
+input_type = st.radio("조사 시작점", ["오류 제보", "제보 없음 · 관측 사건 조사"], horizontal=True)
+claim = st.text_input("오류 제보", key="report_claim") if input_type == "오류 제보" else None
+if st.session_state.get("selected_input_type") != input_type or (
+    st.session_state.get("analysis") and st.session_state.analysis["verdict"]["claim"] != claim
+):
+    st.session_state.selected_input_type = input_type
+    st.session_state.analysis = None
+    st.session_state.repro = None
+st.caption("합성 데모 전용입니다. 실제 로그, 개인정보, 비밀정보를 입력하지 마세요. NVIDIA NIM 모드에서는 입력한 제보가 외부 API로 전송됩니다.")
 st.text_input("Trace ID", value=trace_id, disabled=True)
 
 live_ready = has_api_key()
@@ -52,7 +60,7 @@ if analysis:
     verdict = analysis["verdict"]
     st.subheader("판정")
     c1, c2, c3 = st.columns(3)
-    c1.metric("제보 확인", verdict["claim_status"])
+    c1.metric("제보 항목 판정", verdict["claim_status"])
     c2.metric("원인 근거", verdict["finding_status"])
     repro = st.session_state.get("repro")
     if repro and repro["verified_in_demo"]:
@@ -67,6 +75,11 @@ if analysis:
     st.write(f"**분류:** {verdict['diagnosis_type']}")
     st.write(f"**다음 조치:** {verdict['next_action']}")
     st.write(f"**실행:** {analysis['mode']} · {analysis['elapsed_ms']} ms · {analysis.get('usage', {})}")
+
+    if verdict["claim_items"]:
+        st.subheader("제보 항목별 대조")
+        st.table(verdict["claim_items"])
+        st.caption("현재는 명시된 HTTP 상태·메서드·경로·'○○ API' 작업명만 추출합니다. 나머지 자연어는 확인된 것으로 취급하지 않습니다.")
 
     st.subheader("증거")
     for item in verdict["evidence"]:

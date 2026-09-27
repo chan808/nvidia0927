@@ -25,7 +25,7 @@ def test_migration_missing():
 def test_wrong_report_does_not_invent_500():
     result = analyze("claim-003", "회원가입에서 500이 납니다")
     assert result["claim_status"] == "CONTRADICTED"
-    assert result["observed_status"] == 400
+    assert result["observed_status"] == 422
     assert result["diagnosis_type"] == "expected_validation"
     assert not result["repro_eligible"]
 

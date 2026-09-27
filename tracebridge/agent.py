@@ -11,7 +11,7 @@ from typing import Any
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from .evidence import EvidenceError, call_tool, get_trace
+from .evidence import EvidenceError, EvidenceSource, FIXTURE_SOURCE, LocalBundleEvidenceSource, call_tool, get_trace
 from .triage import analyze, summarize
 
 
@@ -64,26 +64,64 @@ def has_api_key() -> bool:
     return bool(key and key != "your_nvidia_api_key_here")
 
 
-def run_offline(trace_id: str, claim: str) -> dict[str, Any]:
-    """A clearly labelled fixture mode for validation without external inference."""
+def _offline_step_result(name: str, result: dict[str, Any], fixture: bool) -> dict[str, Any]:
+    if fixture:
+        return result
+    if name == "get_trace":
+        visible = {
+            key: result[key]
+            for key in ("trace_id", "environment", "service", "version", "method", "path", "operation", "response_status")
+            if key in result
+        }
+        if isinstance(result.get("request"), dict):
+            visible["request_fields"] = sorted(result["request"])
+        return visible
+    if name == "get_backend_evidence":
+        return {"trace_id": result["trace_id"], "log_line_count": len(result.get("logs", []))}
+    if name == "get_contract":
+        return {
+            "method": result.get("method"),
+            "path": result.get("path"),
+            "required_fields": result["openapi"]["required"],
+            "property_names": sorted(result["openapi"]["properties"]),
+        }
+    if name == "get_migration_state":
+        return {key: result[key] for key in ("environment", "applied", "expected", "related_file") if key in result}
+    return {}
+
+
+def run_offline(trace_id: str, claim: str | None = None, source: EvidenceSource | None = None) -> dict[str, Any]:
+    """Read one scoped source without external inference or code execution."""
     started = time.monotonic()
     steps: list[dict[str, Any]] = []
+    evidence_source = source or FIXTURE_SOURCE
     try:
-        trace = get_trace(trace_id)
-        steps.append({"tool": "get_trace", "reason": "제보와 실제 응답 대조", "result": trace})
-        contract = call_tool("get_contract", trace_id)
-        steps.append({"tool": "get_contract", "reason": "요청 필드와 API 계약 비교", "result": contract})
-        if trace["response_status"] == 500:
-            for name, reason in [
-                ("get_backend_evidence", "500 원인 로그 확인"),
-                ("get_migration_state", "DB 스키마 버전 확인"),
-            ]:
-                steps.append({"tool": name, "reason": reason, "result": call_tool(name, trace_id)})
+        trace = evidence_source.get_trace(trace_id)
+        steps.append({"tool": "get_trace", "reason": "제보와 실제 응답 대조", "result":
+                      _offline_step_result("get_trace", trace, evidence_source is FIXTURE_SOURCE)})
     except EvidenceError:
         pass
-    verdict = analyze(trace_id, claim)
+    else:
+        for name, reason in [
+            ("get_contract", "요청 필드와 API 계약 비교"),
+            ("get_backend_evidence", "백엔드 오류 로그 확인"),
+            ("get_migration_state", "DB 스키마 버전 확인"),
+        ]:
+            if name != "get_contract" and trace.get("response_status", 0) < 500:
+                continue
+            try:
+                result = getattr(evidence_source, name)(trace_id)
+            except EvidenceError:
+                continue
+            steps.append({"tool": name, "reason": reason, "result":
+                          _offline_step_result(name, result, evidence_source is FIXTURE_SOURCE)})
+    verdict = analyze(trace_id, claim, source=evidence_source)
     return {
-        "mode": "offline_fixture",
+        "mode": (
+            "offline_fixture" if evidence_source is FIXTURE_SOURCE
+            else "offline_bundle" if isinstance(evidence_source, LocalBundleEvidenceSource)
+            else "offline_source"
+        ),
         "agent_message": summarize(verdict),
         "steps": steps,
         "verdict": verdict,
@@ -92,7 +130,7 @@ def run_offline(trace_id: str, claim: str) -> dict[str, Any]:
     }
 
 
-def run_live(trace_id: str, claim: str) -> dict[str, Any]:
+def run_live(trace_id: str, claim: str | None = None) -> dict[str, Any]:
     started = time.monotonic()
     steps: list[dict[str, Any]] = []
     try:
@@ -116,7 +154,7 @@ def run_live(trace_id: str, claim: str) -> dict[str, Any]:
     model = os.getenv("NVIDIA_MODEL", DEFAULT_MODEL)
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": SYSTEM_PROMPT + "\nProject skill:\n" + _project_skill()},
-        {"role": "user", "content": f"Bug report: {claim}\nObserved trace: {json.dumps(trace, ensure_ascii=False)}\nTrace ID: {trace_id}"},
+        {"role": "user", "content": f"Bug report: {claim if claim and claim.strip() else '(none; investigate the observed incident)'}\nObserved trace: {json.dumps(trace, ensure_ascii=False)}\nTrace ID: {trace_id}"},
     ]
     total_usage = {"prompt_tokens": 0, "completion_tokens": 0}
     calls_used = 0
