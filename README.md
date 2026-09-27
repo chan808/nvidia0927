@@ -47,6 +47,14 @@ CLI 실행:
 
 `submission/`에 한 파일이 만들어집니다. 포함 목록을 명시적으로 제한해 `.env`와 가상 환경을 제외합니다. 폼의 최대 100 MB 제한보다 작은지 출력된 크기를 확인하세요.
 
+GitHub 링크를 제출한다면 폼 요구사항에 맞는 PDF를 만듭니다:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.create_portfolio_pdf "팀명"
+```
+
+`output/pdf/`의 PDF 한 파일을 업로드합니다. 먼저 공개 저장소의 코드가 실제로 올라와 있는지 확인하세요.
+
 NeMo Agent Toolkit 워크플로 실행:
 
 ```powershell
@@ -55,7 +63,7 @@ NeMo Agent Toolkit 워크플로 실행:
 
 `nat_workflow.yml`과 `tracebridge/nat_plugin.py`에는 네 개의 읽기 전용 도구와 NVIDIA NIM 엔드포인트가 정의돼 있습니다. 실제 실행에서 trace·계약·백엔드 도구 호출을 확인했습니다. 이 별도 Toolkit 경로는 재현 테스트를 실행하지 않습니다. 테스트는 UI 또는 CLI에서 별도로 실행합니다.
 
-프로젝트용 NeMo Agent Skill은 `skills/tracebridge-triage/SKILL.md`에 있습니다. NVIDIA SkillSpector 정적 검사 결과는 `generated/skillspector-report.md`에 저장됩니다. `generated/`는 실행 결과라 Git에서 제외됩니다.
+프로젝트용 에이전트 Skill은 `skills/tracebridge-triage/SKILL.md`에 있습니다. NVIDIA SkillSpector 정적 검사 요약은 `SKILL_SCAN_REPORT.md`에 있고, 전체 실행 결과는 `generated/skillspector-report.md`에 저장됩니다. `generated/`는 Git에서 제외됩니다.
 
 검증:
 
@@ -78,6 +86,7 @@ nat_workflow.yml           NeMo Agent Toolkit 도구 호출 워크플로
 skills/tracebridge-triage/ 프로젝트용 에이전트 조사 스킬
 DESIGN.md                  범위, 상태, 비용 한도, 한계 상세 설계
 SUBMISSION_DRAFT.md        신청서 문안 및 두 사람 제출 체크리스트
+SKILL_SCAN_REPORT.md        NVIDIA SkillSpector 정적 검사 요약
 ```
 
 ## 검증 범위와 한계

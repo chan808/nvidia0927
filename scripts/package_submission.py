@@ -15,6 +15,7 @@ TOP_LEVEL = [
     "README.md",
     "DESIGN.md",
     "SUBMISSION_DRAFT.md",
+    "SKILL_SCAN_REPORT.md",
     "app.py",
     "nat_workflow.yml",
     "pyproject.toml",
