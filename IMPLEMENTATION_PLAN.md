@@ -1,5 +1,7 @@
 # TraceBridge 구현 설계와 첫 작업
 
+> 초기 작업 계획과 진행 기록. **제품 전체의 목표·우선순위는 [docs/README.md](docs/README.md)**에서 확인한다. 이 문서의 완료 기준을 향후 서비스 전체의 완료 기준으로 사용하지 않는다.
+
 작성: 2026-09-27. 제품 범위와 성공 기준은 [PRODUCT_DIRECTION.md](PRODUCT_DIRECTION.md)를 따른다.
 
 ## 목표 구조

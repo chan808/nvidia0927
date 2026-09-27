@@ -1,6 +1,8 @@
 # TraceBridge 제품 방향 결정
 
-작성: 2026-09-27. 이 문서는 다음 구현의 기준이다. 현재 동작 범위는 [README.md](README.md)와 [DESIGN.md](DESIGN.md)를 따른다.
+> 2026-09-27 제품 방향 기록. **현재 목표 서비스의 기준은 [docs/README.md](docs/README.md)와 연결된 문서**다. 이 문서는 이전 결정과 구현 배경을 보존한다.
+
+작성: 2026-09-27. 이 문서는 당시 구현 방향의 기록이다. 현재 서비스 목표는 [docs/README.md](docs/README.md), 현재 동작 범위는 [README.md](README.md)와 [DESIGN.md](DESIGN.md)를 따른다.
 
 ## 결정
 

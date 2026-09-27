@@ -1,5 +1,7 @@
 # TraceBridge 신청서 초안
 
+> 2026-09-27 시점의 제출 문안 초안. **현재 구현·대회 조건은 [docs/current-state.md](docs/current-state.md)와 [docs/competition.md](docs/competition.md)를 다시 확인한 뒤 사용한다.** 목표 서비스 기능을 구현 완료로 읽지 않는다.
+
 이 문안은 현재 **실제로 구현·검증한 기능**만 설명합니다. 두 팀원은 같은 서비스 하나를 대표 포트폴리오로 제출하고, 신청서는 각자 작성합니다. GitHub 저장소는 `https://github.com/chan808/nvidia0927`이며, 코드 푸시 후 링크를 제출합니다.
 
 ## 서비스 명
