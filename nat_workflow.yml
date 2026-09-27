@@ -17,9 +17,6 @@ llms:
     max_tokens: 1000
     max_retries: 0
     request_timeout: 90
-    extra_body:
-      chat_template_kwargs:
-        enable_thinking: false
 
 workflow:
   _type: tool_calling_agent

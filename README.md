@@ -61,7 +61,7 @@ NeMo Agent Toolkit 워크플로 실행:
 .\.venv\Scripts\python.exe -m scripts.run_nat contract-001
 ```
 
-`nat_workflow.yml`과 `tracebridge/nat_plugin.py`에는 네 개의 읽기 전용 도구와 NVIDIA NIM 엔드포인트가 정의돼 있습니다. 실제 실행에서 trace·계약·백엔드 도구 호출을 확인했습니다. 이 별도 Toolkit 경로는 재현 테스트를 실행하지 않습니다. 테스트는 UI 또는 CLI에서 별도로 실행합니다.
+`nat_workflow.yml`과 `tracebridge/nat_plugin.py`에는 네 개의 읽기 전용 도구와 NVIDIA NIM 엔드포인트가 정의돼 있습니다. 실제 실행에서 trace·계약·백엔드 도구 호출을 확인했습니다. 호스팅 모델의 응답 지연으로 이 선택 경로는 간헐적으로 시간 초과가 발생합니다. 2분 시연에는 위의 직접 NIM 화면을 사용하세요. Toolkit 경로는 재현 테스트를 실행하지 않으며, 테스트는 UI 또는 CLI에서 별도로 실행합니다.
 
 프로젝트용 에이전트 Skill은 `skills/tracebridge-triage/SKILL.md`에 있습니다. NVIDIA SkillSpector 정적 검사 요약은 `SKILL_SCAN_REPORT.md`에 있고, 전체 실행 결과는 `generated/skillspector-report.md`에 저장됩니다. `generated/`는 Git에서 제외됩니다.
 
