@@ -20,7 +20,9 @@ from .triage import EXCEPTION_PATTERN
 WORKSPACE = Path(__file__).resolve().parents[1]
 REUSABLE = {"APPROVED", "EDITED"}
 SIGNAL_KEYS = ("error_codes", "paths", "exceptions", "stack_fingerprints")
-EDITABLE = {"symptom", "finding", "next_action"}
+TEXT_EDITABLE = {"symptom", "finding", "next_action"}
+EDITABLE = TEXT_EDITABLE | {"applicability", "check_sequence", "disproof_conditions", "invalid_conditions", "limitations"}
+CONDITION_KEYS = {"service", "environment", "operation", "method", "path", "runtime_sha", "local_sha"}
 ROUTES = {"GUIDANCE", "WORK_CANDIDATE", "INVESTIGATE", "REQUEST_CONTEXT"}
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS incidents (
@@ -126,9 +128,14 @@ def _memory_record(search: dict) -> dict:
     """Store search measurements and clue snapshots, not arbitrary nested input."""
     output = _selected(search, ("status", "error_type", "strategy", "hit_count", "elapsed_ms", "query_signals", "query_hash"))
     output["cards"] = []
+    if search.get("status") == "DISABLED":
+        output.update(hit_count=0, current_recheck={}, rechecks=[])
+        return output
     for card in search.get("cards", [])[:2]:
-        saved = _selected(card, ("card_id", "project_id", "incident_id", "source_run_id", "revision", "card_kind", "diagnosis_type", "observed_status", "scope", "signals", "source_run_status", "verification", "version_provenance", "evidence_refs"))
-        for key in EDITABLE:
+        saved = _selected(card, ("card_id", "project_id", "incident_id", "source_run_id", "revision", "card_kind", "diagnosis_type", "observed_status", "scope", "signals", "source_run_status", "verification", "version_provenance", "evidence_refs",
+            "card_format", "applicability", "observed_features", "check_sequence", "disproof_conditions", "invalid_conditions", "limitations", "source", "last_checked", "verification_results", "field_sources",
+            "contract_analysis", "responsibility", "symptom_status", "product_status", "claim_verification"))
+        for key in TEXT_EDITABLE:
             saved[key] = _text(card.get(key, ""))
         saved["review"] = _selected(card.get("review", {}), ("status", "revision", "reviewer", "at", "note"))
         saved["hypotheses"] = []
@@ -141,7 +148,7 @@ def _memory_record(search: dict) -> dict:
     output["current_recheck"] = _selected(current, ("run_id", "request_connection", "version_provenance", "evidence_refs"))
     output["current_recheck"]["logs"] = _selected(current.get("logs", {}), ("connected", "aggregate", "verified_count"))
     output["current_recheck"]["logs"]["reads"] = [_selected(step, ("tool", "phase", "status", "evidence_ids", "elapsed_ms")) for step in current.get("logs", {}).get("reads", [])]
-    output["rechecks"] = [_selected(item, ("card_id", "source_run_id", "status", "reasons", "current_evidence_refs")) for item in search.get("rechecks", [])[:2]]
+    output["rechecks"] = [_selected(item, ("card_id", "source_run_id", "status", "reasons", "current_evidence_refs", "applicability_status", "current_guidance_observed", "usable_as_current_evidence")) for item in search.get("rechecks", [])[:2]]
     return output
 
 
@@ -161,6 +168,8 @@ def current_signals(result: dict) -> dict[str, list[str]]:
     """Use current scoped observations, excluding report guesses and source constants."""
     signals = {key: [] for key in SIGNAL_KEYS}
     for item in result.get("observations", []):
+        if item.get("run_id", result.get("run_id")) != result.get("run_id"):
+            continue
         if item.get("kind") != "rule_observation" and not (item.get("kind") == "log" and item.get("scope_status") == "VERIFIED"):
             continue
         found = item.get("signals") or signals_from_text(item.get("content", item.get("fact", "")))
@@ -229,7 +238,7 @@ def minimal_record(result: dict) -> dict:
         "route", "work_role", "diagnosis_type", "finding_status", "claim_status", "claim_coverage",
         "observed_status", "reported_status", "run_status", "stop_reason", "executed_at", "elapsed_ms", "message_received_at",
         "model", "model_calls", "session_model_calls", "deployment_observed", "input_modes",
-        "case_kind", "requested_action",
+        "case_kind", "requested_action", "symptom_status", "product_status",
     ) if key in result}
     record = _metadata(record)
     record.update(revision=revision, record_format="minimal_sqlite_v1")
@@ -237,6 +246,11 @@ def minimal_record(result: dict) -> dict:
         record[key] = _text(result.get(key, ""))
     for key in ("scope", "candidates", "candidate_trace_ids", "version_provenance", "log_scope", "usage", "timeout_reasons", "hypothesis_updates", "relative_date_basis", "correlation_confirmation"):
         record[key] = _metadata(result.get(key, [] if key in {"candidates", "candidate_trace_ids", "timeout_reasons", "hypothesis_updates"} else {}))
+    if "responsibility" in result:
+        record["responsibility"] = _selected(result["responsibility"], ("status", "reason", "fields", "evidence_sources"))
+    if "contract_analysis" in result:
+        record["contract_analysis"] = _selected(result["contract_analysis"], ("status", "complete", "scope_status", "provenance", "versions",
+            "required_fields", "request_fields", "missing_fields", "unexpected_fields", "forbidden_fields", "type_mismatches", "unobserved_types", "responsibility", "limitations"))
     record["steps"] = [_selected(step, ("tool", "phase", "status", "evidence_ids", "elapsed_ms")) for step in result.get("steps", [])]
     record["model_trace"] = [_selected(call, ("call", "status", "http_status", "tools", "elapsed_ms", "model", "response_id", "finish_reason", "mode")) for call in result.get("model_trace", [])]
     record["service_calls"] = []
@@ -283,10 +297,171 @@ def minimal_record(result: dict) -> dict:
     return record
 
 
+def _sha(value) -> str | None:
+    return value.lower() if isinstance(value, str) and re.fullmatch(r"[a-fA-F0-9]{7,64}", value) else None
+
+
+def _same_sha(left: str, right: str) -> bool:
+    return left.startswith(right) or right.startswith(left)
+
+
+def _historical_refs(record: dict) -> list[str]:
+    return list(dict.fromkeys(f"historical:{record['run_id']}:{item['id']}"
+        for item in [*record.get("observations", []), *record.get("evidence", [])]))
+
+
+def _assessment(record: dict, key: str, default):
+    return record.get(key) or record.get("log_scope", {}).get("assessment", {}).get(key) or default
+
+
+def _applicability(record: dict) -> dict:
+    scope, versions = record.get("scope", {}), record.get("version_provenance", {})
+    runtime = versions.get("runtime", {})
+    return {
+        "project_id": record["project_id"],
+        **{key: scope.get(key) for key in ("service", "environment", "operation", "method", "path")},
+        "runtime_sha": _sha(runtime.get("sha")) if runtime.get("status") == "OBSERVED" else None,
+        "local_sha": _sha(versions.get("local_head", {}).get("sha")),
+        "contract_versions": _metadata(_assessment(record, "contract_analysis", {}).get("versions", {})),
+        "source_run_id": record["run_id"],
+    }
+
+
+def _verification_results(record: dict, job: dict | None = None) -> dict:
+    """Describe recorded verification, requiring a persisted job for candidate success."""
+    run_id, change = record["run_id"], record.get("change", {})
+    known = set(_historical_refs(record))
+    supporting = []
+    for hypothesis in record.get("hypotheses", []):
+        if hypothesis.get("cause_confirmed"):
+            for ref in hypothesis.get("supporting_evidence_refs", []):
+                qualified = f"historical:{ref['run_id']}:{ref['evidence_id']}"
+                if qualified in known:
+                    supporting.append(qualified)
+    cause_recorded = record.get("cause_confirmed") is True
+    candidate = job.get("candidate_fix_verified") is True if job else False
+    checks = [_selected(item, ("phase", "command_id", "status", "exit_code", "elapsed_ms", "input",
+        "execution_settings_sha256", "stdout_ref", "stdout_sha256", "stderr_ref", "stderr_sha256"))
+        for item in (job or {}).get("checks", [])]
+    return {
+        "cause_confirmation": {
+            "status": "RECORDED_CONFIRMED" if cause_recorded and supporting else "REPORTED_UNVERIFIED" if cause_recorded else "NOT_CONFIRMED",
+            "recorded": cause_recorded, "source_run_id": run_id, "evidence_refs": list(dict.fromkeys(supporting)),
+        },
+        "candidate_validation": {
+            "status": "VERIFIED" if candidate else "REPORTED_UNVERIFIED" if change.get("candidate_fix_verified") is True else "NOT_VERIFIED",
+            "source_run_id": run_id, "source_work_id": (job or {}).get("work_id"),
+            "scope": change.get("verification_scope", "NOT_RECORDED"), "checks": checks,
+            "artifact_ref": (job or change).get("artifact_ref"), "diff_sha256": (job or change).get("diff", {}).get("sha256"),
+        },
+        "original_application": {
+            "status": "RECORDED_APPLIED" if record.get("fix_applied") is True or change.get("original_applied") is True else "NOT_APPLIED",
+            "source_run_id": run_id,
+        },
+        "service_recovery": {
+            "status": "RECORDED_VERIFIED" if change.get("service_recovery") == "VERIFIED" else "NOT_VERIFIED",
+            "source_run_id": run_id, "legacy_fix_verified": record.get("fix_verified") is True,
+        },
+    }
+
+
+def _enrich_card(card: dict, record: dict, job: dict | None = None, investigation: dict | None = None) -> dict:
+    """Add JSON defaults on read; never rewrite source runs, hashes or review history."""
+    run_id, refs = record["run_id"], _historical_refs(record)
+    source = {"run_id": run_id, "revision": record["revision"], "at": record.get("executed_at"), "kind": "SOURCE_RUN"}
+    aggregate = record.get("log_scope", {}).get("aggregate", {})
+    card.setdefault("card_format", "reviewed_manual_v2")
+    card.setdefault("applicability", _applicability(record))
+    card["applicability"].setdefault("contract_versions", _applicability(record)["contract_versions"])
+    card.setdefault("contract_analysis", _metadata(_assessment(record, "contract_analysis", {})))
+    card.setdefault("responsibility", _metadata(_assessment(record, "responsibility", {"status": "UNCONFIRMED"})))
+    card.setdefault("symptom_status", _assessment(record, "symptom_status", "UNOBSERVED"))
+    card.setdefault("product_status", _assessment(record, "product_status", "UNCONFIRMED"))
+    card.setdefault("claim_verification", _selected(record, ("reported_status", "observed_status", "claim_status", "claim_items")))
+    card.setdefault("observed_features", {
+        "observed_status": record.get("observed_status"), "signals": deepcopy(record.get("signals", {})),
+        "observations_complete": aggregate.get("complete"), "conflicts": bool(aggregate.get("conflicts")),
+        "evidence_refs": refs,
+    })
+    sequence = []
+    descriptions = {
+        "find_logs": "현재 요청의 로그를 다시 조회하고 연결·범위 완전성·관측 충돌을 확인한다.",
+        "get_version": "현재 실행 버전과 로컬 코드 버전의 관측 출처를 다시 확인한다.",
+        "search_code": "현재 코드에서 과거 조회 대상을 다시 확인한다.",
+        "get_contract": "현재 계약과 DTO의 출처·버전을 다시 확인한다.",
+    }
+    for step in record.get("steps", [])[:12]:
+        if step.get("tool") in descriptions:
+            sequence.append({"step": descriptions[step["tool"]], "origin": "RECORDED_TOOL",
+                "source_run_id": run_id, "tool": step["tool"], "past_status": step.get("status"),
+                "evidence_refs": [ref for id_ in step.get("evidence_ids", [])
+                    if (ref := f"historical:{run_id}:{id_}") in refs]})
+    planned = [*record.get("next_steps", []), *[h.get("verification_step", "") for h in record.get("hypotheses", [])], record.get("next_action", "")]
+    for text in dict.fromkeys(value for value in planned if value):
+        sequence.append({"step": _text(text), "origin": "RECORDED_PLAN", "source_run_id": run_id, "evidence_refs": refs[:4]})
+    card.setdefault("check_sequence", sequence[:12])
+    disproof = [
+        "현재 응답 상태·오류 코드·예외·스택 지문이 과거 관측과 다르다.",
+        "현재 프로젝트·서비스·환경·동작·메서드·경로가 적용 조건과 다르거나 미관측이다.",
+        "과거 또는 현재 실행 버전이 미관측이거나 서로 다르다.",
+        "현재 관측이 충돌하거나 조회 범위를 끝까지 확인하지 못했다.",
+    ]
+    card.setdefault("disproof_conditions", [{"condition": text, "origin": "MEMORY_RECHECK_POLICY", "source_run_id": run_id, "evidence_refs": refs[:4]} for text in disproof])
+    card.setdefault("invalid_conditions", [])
+    limits = ["과거 카드는 현재 근거와 실행 권한을 대신하지 않는다.", "검토 승인은 원인·수정·회복 확인이 아니다."]
+    if record.get("version_provenance", {}).get("runtime", {}).get("status") != "OBSERVED":
+        limits.append("출처 실행의 실제 실행 버전이 미관측이다.")
+    limits.extend(_text(item) for item in (job or {}).get("limitations", []))
+    card.setdefault("limitations", limits[:12])
+    card.setdefault("source", {
+        "run_id": run_id, "incident_id": record["incident_id"], "revision": record["revision"],
+        "executed_at": record.get("executed_at"), "route": record["route"], "run_status": record["run_status"],
+        "case_kind": record.get("case_kind", "NOT_RECORDED"),
+        "evidence": [_selected(item, ("id", "kind", "source", "content_hash", "scope_status", "source_revision"))
+            for item in record.get("evidence", [])[:24]],
+    })
+    card.setdefault("last_checked", {
+        "source_run_id": run_id, "at": record.get("executed_at"), "run_status": record["run_status"],
+        "observations_complete": aggregate.get("complete"), "conflicts": bool(aggregate.get("conflicts")),
+        "runtime_status": record.get("version_provenance", {}).get("runtime", {}).get("status", "NOT_OBSERVED"),
+    })
+    origins = card.setdefault("field_sources", {})
+    for key in EDITABLE:
+        origins.setdefault(key, deepcopy(source))
+    if job and investigation:
+        # A prepared-change run carries the original investigation's scope/version.
+        # Finishing copy checks does not constitute a new read of service logs.
+        parent = investigation["run_id"]
+        card["source"]["investigation_run_id"] = parent
+        card["source"]["work_id"] = job["work_id"]
+        card["source"]["investigation_evidence"] = [_selected(item, ("id", "kind", "source", "content_hash", "scope_status")) for item in investigation.get("evidence", [])[:24]]
+        previous = investigation.get("log_scope", {}).get("aggregate", {})
+        card["observed_features"] = {"source_run_id": parent, "observed_status": investigation.get("observed_status"),
+            "signals": deepcopy(investigation.get("signals", {})), "observations_complete": previous.get("complete"),
+            "conflicts": bool(previous.get("conflicts")), "evidence_refs": _historical_refs(investigation)}
+        card["version_provenance"] = deepcopy(investigation.get("version_provenance", {}))
+        card["applicability"]["contract_versions"] = _applicability(investigation)["contract_versions"]
+        card["contract_analysis"] = _metadata(_assessment(investigation, "contract_analysis", {}))
+        card["responsibility"] = _metadata(_assessment(investigation, "responsibility", {"status": "UNCONFIRMED"}))
+        card["symptom_status"] = _assessment(investigation, "symptom_status", "UNOBSERVED")
+        card["product_status"] = _assessment(investigation, "product_status", "UNCONFIRMED")
+        card["claim_verification"] = _selected(investigation, ("reported_status", "observed_status", "claim_status", "claim_items"))
+        card["last_checked"] = {"source_run_id": parent, "at": investigation.get("executed_at"), "run_status": investigation["run_status"],
+            "observations_complete": previous.get("complete"), "conflicts": bool(previous.get("conflicts")),
+            "runtime_status": investigation.get("version_provenance", {}).get("runtime", {}).get("status", "NOT_OBSERVED")}
+        if origins["applicability"].get("kind") != "REVIEW_EDIT":
+            origins["applicability"] = {"run_id": parent, "kind": "SOURCE_RUN", "at": investigation.get("executed_at"), "revision": investigation["revision"]}
+        if origins["limitations"].get("kind") != "REVIEW_EDIT":
+            card["limitations"] = list(dict.fromkeys([*card["limitations"], *[_text(value) for value in job.get("limitations", [])]]))[:12]
+    # These factual projections always come from source records, never editable card text.
+    card["verification_results"] = _verification_results(record, job)
+    return card
+
+
 def _new_card(record: dict) -> dict:
     aggregate = record.get("log_scope", {}).get("aggregate", {})
     guidance = record["route"] == "GUIDANCE" and record.get("correlation") == "EXACT_ID" and record["run_status"] == "COMPLETED" and not aggregate.get("conflicts") and aggregate.get("complete", True)
-    return {
+    return _enrich_card({
         "card_id": record["run_id"], "project_id": record["project_id"], "incident_id": record["incident_id"],
         "source_run_id": record["run_id"], "revision": record["revision"],
         "card_kind": "GUIDANCE" if guidance else "UNCONFIRMED",
@@ -299,7 +474,140 @@ def _new_card(record: dict) -> dict:
         "evidence_refs": [f"historical:{record['run_id']}:{item['id']}" for item in record["observations"][:4]],
         "review": {"status": "PENDING", "revision": 0, "history": []},
         **({"prepared_change": deepcopy(record["change"])} if "change" in record else {}),
-    }
+    }, record)
+
+
+def _condition_edit(conditions: dict, *, nonempty: bool = False) -> dict:
+    if not isinstance(conditions, dict) or set(conditions) - CONDITION_KEYS or nonempty and not conditions:
+        raise ValueError("Conditions may contain service, environment, operation, method, path, runtime_sha or local_sha only")
+    output = {}
+    for key, value in conditions.items():
+        if value is None and not nonempty:
+            output[key] = None
+        elif not isinstance(value, str) or not value.strip() or len(value) > 200:
+            raise ValueError("Condition values need 1..200 characters")
+        elif key.endswith("_sha"):
+            if not _sha(value):
+                raise ValueError("Version conditions require a 7..64 character hexadecimal SHA")
+            output[key] = _sha(value)
+        else:
+            output[key] = _path(value) if key == "path" else redact(value)
+    return output
+
+
+def _review_changes(card: dict, changes: dict, revision: int) -> dict:
+    output = {}
+    for key, value in changes.items():
+        if key in TEXT_EDITABLE:
+            if not isinstance(value, str) or not value.strip() or len(value) > 500:
+                raise ValueError("Card edits need 1..500 characters")
+            output[key] = _text(value)
+        elif key == "applicability":
+            output[key] = {**card[key], **_condition_edit(value)}
+        elif key == "invalid_conditions":
+            if not isinstance(value, list) or len(value) > 12:
+                raise ValueError("Invalid conditions need a list of at most 12 entries")
+            output[key] = []
+            for item in value:
+                if not isinstance(item, dict) or set(item) != {"when", "reason"}:
+                    raise ValueError("An invalid condition needs when and reason")
+                reason = item["reason"]
+                if not isinstance(reason, str) or not reason.strip() or len(reason) > 500:
+                    raise ValueError("Invalid condition reason needs 1..500 characters")
+                output[key].append({"when": _condition_edit(item["when"], nonempty=True), "reason": _text(reason),
+                    "source_run_id": card["source_run_id"], "review_revision": revision})
+        else:
+            if not isinstance(value, list) or len(value) > 12 or any(not isinstance(item, str) or not item.strip() or len(item) > 500 for item in value):
+                raise ValueError("Steps, disproof conditions and limitations need at most 12 short strings")
+            if key == "limitations":
+                output[key] = [_text(item) for item in value]
+            else:
+                label = "step" if key == "check_sequence" else "condition"
+                output[key] = [{label: _text(item), "origin": "REVIEW_EDIT", "source_run_id": card["source_run_id"],
+                    "review_revision": revision, "evidence_refs": []} for item in value]
+    return output
+
+
+def _md(value) -> str:
+    """Render untrusted card wording as text, without links, HTML or code blocks."""
+    value = "미관측" if value is None else str(value)
+    value = re.sub(r"[\x00-\x20]+", " ", value).strip()
+    return re.sub(r"([\\`*_{}\[\]()<>#+.!|~-])", r"\\\1", value)
+
+
+def _origin(card: dict, field: str) -> str:
+    origin = card.get("field_sources", {}).get(field, {})
+    text = "출처 실행 " + _md(origin.get("run_id", card["source_run_id"]))
+    if origin.get("kind") == "REVIEW_EDIT":
+        text += ", 검토 정정 " + _md(origin.get("review_revision")) + " · " + _md(origin.get("reviewer"))
+    return text
+
+
+def _render_manual(project_id: str, cards: list[dict]) -> str:
+    lines = [f"# {_md(project_id)} 사건 매뉴얼", "",
+        "검토된 과거 기록의 확인 순서와 조치 단서다. 현재 자료로 재검증해야 하며 편집·실행·배포 권한을 부여하지 않는다.",
+        "검토 승인, 원인 확인, 후보 사본 검증, 원본 적용, 서비스 회복은 각각 별도 상태다.", ""]
+    if not cards:
+        lines.append("현재 내보낼 검토 카드가 없다.")
+    for card in cards:
+        source, review = card["source"], card["review"]
+        lines.extend([f"## {_md(card['symptom'])}", "",
+            f"- 카드: {_md(card['card_id'])}; 사건: {_md(card['incident_id'])}; 출처 실행: {_md(card['source_run_id'])}; revision: {card['revision']}",
+            f"- 출처 시각: {_md(source.get('executed_at'))}; 실행 상태: {_md(source['run_status'])}; 자료 유형: {_md(source['case_kind'])}",
+            f"- 검토: {_md(review['status'])}; 검토자: {_md(review.get('reviewer'))}; 시각: {_md(review.get('at'))}; 검토 revision: {review['revision']}",
+            f"- 기록된 판정·가설: {_md(card['finding'])} ({_origin(card, 'finding')})", "", "### 적용 조건과 버전", ""])
+        investigation_id = source.get("investigation_run_id", card["source_run_id"])
+        if source.get("investigation_run_id"):
+            lines.append(f"- 관측·버전의 조사 출처 실행: {_md(investigation_id)}; 후보 검증 출처 작업: {_md(source['work_id'])}")
+        claim = card["claim_verification"]
+        lines.append(f"- 제보 HTTP: {_md(claim.get('reported_status'))}; 실제 HTTP: {_md(claim.get('observed_status'))}; 제보 확인: {_md(claim.get('claim_status'))}; 증상: {_md(card['symptom_status'])}; 제품: {_md(card['product_status'])}; 책임: {_md(card['responsibility'].get('status'))}; 출처 실행: {_md(investigation_id)}")
+        for key in ("project_id", "service", "environment", "operation", "method", "path", "runtime_sha", "local_sha"):
+            lines.append(f"- {key}: {_md(card['applicability'].get(key))} ({_origin(card, 'applicability')})")
+        for name in ("local_head", "configured", "runtime"):
+            version = card.get("version_provenance", {}).get(name, {})
+            lines.append(f"- 버전 출처 {name}: {_md(version.get('source'))}; SHA: {_md(version.get('sha'))}; 상태: {_md(version.get('status', 'NOT_RECORDED'))}; 출처 실행: {_md(investigation_id)}")
+        versions = card.get("applicability", {}).get("contract_versions", {})
+        if versions:
+            lines.append(f"- 계약·DTO·호출자 버전: {_md(_json(versions))}; 출처 실행: {_md(investigation_id)}")
+        if card["contract_analysis"].get("provenance"):
+            lines.append(f"- 계약 분석 출처: {_md(_json(card['contract_analysis']['provenance']))}; 출처 실행: {_md(investigation_id)}")
+        features = card["observed_features"]
+        lines.extend([f"- 관측 특징: HTTP {_md(features.get('observed_status'))}; {_md(_json(features.get('signals', {})))}; 출처 실행: {_md(features.get('source_run_id', card['source_run_id']))}",
+            "", "### 확인 순서", ""])
+        for index, step in enumerate(card["check_sequence"], 1):
+            refs = ", ".join(_md(ref) for ref in step.get("evidence_refs", [])) or "근거 ID 없음"
+            lines.append(f"{index}. {_md(step['step'])} ({_origin(card, 'check_sequence')}; {_md(step['origin'])}; {refs})")
+        if not card["check_sequence"]:
+            lines.append("출처에 확인 순서가 기록되지 않았다.")
+        lines.extend(["", "### 반증·보류 및 부적합 조건", ""])
+        for item in card["disproof_conditions"]:
+            lines.append(f"- {_md(item['condition'])} ({_origin(card, 'disproof_conditions')}; {_md(item['origin'])})")
+        for item in card["invalid_conditions"]:
+            lines.append(f"- 부적합: {_md(_json(item['when']))} — {_md(item['reason'])} ({_origin(card, 'invalid_conditions')})")
+        lines.extend(["", "### 조치와 검증 결과", "",
+            f"- 기록된 다음 조치: {_md(card['next_action'])} ({_origin(card, 'next_action')}); 담당자 검토와 현재 근거 확인이 필요하다.",
+            f"- 승인·정정: {_md(review['status'])} (검토 revision {review['revision']}; 출처 실행: {_md(card['source_run_id'])})"])
+        labels = {"cause_confirmation": "원인 확인", "candidate_validation": "후보 사본 검증", "original_application": "원본 적용", "service_recovery": "회복 확인"}
+        for key, label in labels.items():
+            item = card["verification_results"][key]
+            detail = "; 수정안 검증, 원본 적용·회복은 별도" if key == "candidate_validation" and item["status"] == "VERIFIED" else ""
+            lines.append(f"- {label}: {_md(item['status'])} (출처 실행: {_md(item['source_run_id'])}{detail})")
+        candidate = card["verification_results"]["candidate_validation"]
+        if candidate.get("source_work_id"):
+            lines.append(f"- 검증 작업: {_md(candidate['source_work_id'])}; 범위: {_md(candidate['scope'])}; diff SHA: {_md(candidate.get('diff_sha256'))}; 산출물: {_md(candidate.get('artifact_ref'))}; 출처 실행: {_md(candidate['source_run_id'])}")
+        for check in candidate["checks"]:
+            lines.append(f"- 검사 {_md(check.get('phase'))}/{_md(check.get('command_id'))}: {_md(check.get('status'))}; exit: {_md(check.get('exit_code'))}; 기록: {_md(check.get('stdout_ref'))}; 해시: {_md(check.get('stdout_sha256'))}; 출처 작업: {_md(candidate['source_work_id'])}; 출처 실행: {_md(candidate['source_run_id'])}")
+        lines.extend(["", "### 근거 출처·마지막 확인·한계", ""])
+        for item in source["evidence"]:
+            lines.append(f"- {_md('historical:' + card['source_run_id'] + ':' + item['id'])}: {_md(item.get('kind'))}; 출처: {_md(item.get('source'))}; 해시: {_md(item.get('content_hash'))}")
+        for item in source.get("investigation_evidence", []):
+            lines.append(f"- {_md('historical:' + investigation_id + ':' + item['id'])}: {_md(item.get('kind'))}; 조사 출처: {_md(item.get('source'))}; 해시: {_md(item.get('content_hash'))}")
+        last = card["last_checked"]
+        lines.append(f"- 마지막 자료 확인: {_md(last.get('at'))}; 출처 실행: {_md(last['source_run_id'])}; 실행 상태: {_md(last['run_status'])}; 조회 완전성: {_md(last.get('observations_complete'))}; 충돌: {_md(last['conflicts'])}; 실행 버전: {_md(last['runtime_status'])}")
+        for limit in card["limitations"]:
+            lines.append(f"- 한계: {_md(limit)} ({_origin(card, 'limitations')})")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 class IncidentStore:
@@ -336,13 +644,19 @@ class IncidentStore:
         """Shared insertion inside the caller's transaction, including A2 job writes."""
         record = minimal_record(result)
         # Hash discarded input too: different private input must not silently share one run ID.
-        digest = _hash(_json({key: value for key, value in result.items() if key != "persistence"}))
+        # CLI presentation/export metadata is attached after the run is saved.
+        # It carries no incident facts and must not make a save-only retry conflict.
+        transport_fields = {"persistence", "presentation", "manual_export"}
+        digest = _hash(_json({key: value for key, value in result.items() if key not in transport_fields}))
+        legacy_digest = _hash(_json({key: value for key, value in result.items() if key != "persistence"}))
         project, incident, run = (record[key] for key in ("project_id", "incident_id", "run_id"))
         when = record.get("executed_at") or datetime.now(timezone.utc).isoformat()
-        card = _new_card(record)
-        old = self.connection.execute("SELECT content_hash FROM runs WHERE run_id=?", (run,)).fetchone()
+        card = _new_card({**record, "executed_at": when})
+        old = self.connection.execute("SELECT content_hash, record_json FROM runs WHERE run_id=?", (run,)).fetchone()
         if old:
-            if old["content_hash"] != digest:
+            supplied_record = {key: value for key, value in result.items() if key != "persistence"}
+            exact_stored_replay = supplied_record == json.loads(old["record_json"])
+            if old["content_hash"] not in {digest, legacy_digest} and not exact_stored_replay:
                 raise RunConflict("Run ID already has different contents")
             return "ALREADY_SAVED"
         self.connection.execute("""INSERT INTO incidents VALUES (?,?,?,?,?,?)
@@ -459,35 +773,65 @@ class IncidentStore:
         return result
 
     def get_card(self, project_id: str, card_id: str) -> dict:
-        row = self.connection.execute("SELECT card_json FROM cards WHERE project_id=? AND card_id=?", (_id(project_id, "project_id"), _id(card_id, "card_id"))).fetchone()
+        row = self.connection.execute("""SELECT c.card_json,r.record_json,r.executed_at FROM cards c
+            JOIN runs r ON r.run_id=c.run_id WHERE c.project_id=? AND c.card_id=?""",
+            (_id(project_id, "project_id"), _id(card_id, "card_id"))).fetchone()
         if not row:
             raise ValueError("Card not found in this project")
         card = json.loads(row["card_json"])
         if card["project_id"] != project_id:
             raise ValueError("Card project scope mismatch")
-        return card
+        record = json.loads(row["record_json"])
+        record.setdefault("executed_at", row["executed_at"])
+        row_job = self.connection.execute("SELECT record_json FROM change_jobs WHERE project_id=? AND result_run_id=?", (project_id, card["source_run_id"])).fetchone()
+        job = json.loads(row_job["record_json"]) if row_job else None
+        investigation = self.get_run(project_id, job["source_run_id"]) if job else None
+        return _enrich_card(card, record, job, investigation)
 
     def review_card(self, project_id: str, card_id: str, action: str, *, reviewer: str, changes: dict | None = None, note: str = "") -> dict:
         reviewer = _text(_id(reviewer, "reviewer"), 80)
-        changes = changes or {}
-        if action not in {"approve", "edit", "reject"} or set(changes) - EDITABLE or action != "edit" and changes or action == "edit" and not changes:
-            raise ValueError("Review edits may change symptom, finding or next_action only")
-        if any(not isinstance(value, str) or not value.strip() or len(value) > 500 for value in changes.values()):
-            raise ValueError("Card edits need 1..500 characters")
+        changes = {} if changes is None else changes
+        if not isinstance(changes, dict) or action not in {"approve", "edit", "reject"} or set(changes) - EDITABLE or action != "edit" and changes or action == "edit" and not changes:
+            raise ValueError("Review edits may change wording and applicability only; factual verification is immutable")
         with self.connection:
             self.connection.execute("BEGIN IMMEDIATE")
             card = self.get_card(project_id, card_id)
             status = {"approve": "APPROVED", "edit": "EDITED", "reject": "REJECTED"}[action]
-            event = {"action": action, "reviewer": reviewer, "at": datetime.now(timezone.utc).isoformat(), "note": _text(note, 300), "before": {key: card[key] for key in changes}, "changes": {key: _text(value) for key, value in changes.items()}}
+            revision = card["review"]["revision"] + 1
+            checked = _review_changes(card, changes, revision)
+            event = {"action": action, "reviewer": reviewer, "at": datetime.now(timezone.utc).isoformat(), "note": _text(note, 300),
+                "before_status": card["review"]["status"], "before": {key: deepcopy(card[key]) for key in changes}, "changes": checked}
             card.update(event["changes"])
-            card["review"] = {"status": status, "revision": card["review"]["revision"] + 1, "reviewer": reviewer, "at": event["at"], "note": event["note"], "history": [*card["review"]["history"], event]}
+            for key in changes:
+                card["field_sources"][key] = {"kind": "REVIEW_EDIT", "run_id": card["source_run_id"], "review_revision": revision, "reviewer": reviewer, "at": event["at"]}
+            card["review"] = {"status": status, "revision": revision, "reviewer": reviewer, "at": event["at"], "note": event["note"], "history": [*card["review"]["history"], event]}
             self.connection.execute("UPDATE cards SET review_status=?,card_json=? WHERE project_id=? AND card_id=?", (status, _json(card), project_id, card_id))
             self.connection.execute("DELETE FROM card_search WHERE card_id=?", (card_id,))
             if status in REUSABLE:
                 # Only reviewable summaries and observed fingerprints are indexed.
-                text = " ".join([card["symptom"], card["finding"], card["next_action"], *[term for values in card["signals"].values() for term in values]])
+                text = " ".join([card["symptom"], card["finding"], card["next_action"], *[step["step"] for step in card["check_sequence"]], *[term for values in card["signals"].values() for term in values]])
                 self.connection.execute("INSERT INTO card_search(card_id,search_text) VALUES (?,?)", (card_id, text))
         return card
+
+    def export_manual(self, project_id: str, *, card_ids: list[str] | None = None) -> dict:
+        """Render a consistent snapshot of reviewed cards; no commands or new findings."""
+        project_id = _id(project_id, "project_id")
+        if card_ids is not None and (not isinstance(card_ids, list) or len(card_ids) > 1000):
+            raise ValueError("Manual card selection needs a list of at most 1000 IDs")
+
+        def snapshot():
+            ids = list(dict.fromkeys(_id(value, "card_id") for value in card_ids)) if card_ids is not None else [row["card_id"]
+                for row in self.connection.execute("SELECT card_id FROM cards WHERE project_id=? AND review_status IN ('APPROVED','EDITED') ORDER BY rowid", (project_id,))]
+            selected = [self.get_card(project_id, value) for value in ids]
+            selected = [card for card in selected if card["review"]["status"] in REUSABLE]
+            return {"status": "OK", "project_id": project_id, "card_count": len(selected),
+                "card_ids": [card["card_id"] for card in selected], "markdown": _render_manual(project_id, selected)}
+
+        if self.connection.in_transaction:
+            return snapshot()
+        with self.connection:
+            self.connection.execute("BEGIN")
+            return snapshot()
 
     def search(self, project_id: str, query: str = "", *, signals: dict | None = None, exclude_incident_id: str | None = None) -> dict:
         started = time.perf_counter()
@@ -536,32 +880,122 @@ class IncidentStore:
         return {"status": "OK", "strategy": strategy, "hit_count": len(cards), "elapsed_ms": round((time.perf_counter() - started) * 1000, 3), "query_signals": exact, "query_hash": _hash(query), "cards": cards}
 
 
-def search_memory(project_id: str, query: str, *, signals: dict | None = None, exclude_incident_id: str | None = None, db_path: str | Path | None = None) -> dict:
+def _empty_search(status: str, query: str, started: float) -> dict:
+    return {"status": status, "strategy": "NONE", "hit_count": 0, "cards": [],
+        "query_signals": {key: [] for key in SIGNAL_KEYS}, "query_hash": _hash(query) if isinstance(query, str) else None,
+        "elapsed_ms": round((time.perf_counter() - started) * 1000, 3)}
+
+
+def search_memory(project_id: str, query: str, *, signals: dict | None = None, exclude_incident_id: str | None = None, db_path: str | Path | None = None, enabled: bool = True) -> dict:
     started = time.perf_counter()
     try:
+        if type(enabled) is not bool:
+            raise ValueError("Memory enabled option must be a bool")
+        if not enabled:
+            return _empty_search("DISABLED", query, started)
         with IncidentStore(db_path) as store:
             result = store.search(project_id, query, signals=signals, exclude_incident_id=exclude_incident_id)
         result["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 3)
         return result
     except (OSError, sqlite3.Error, ValueError) as exc:
-        return {"status": "FAILED", "error_type": type(exc).__name__, "hit_count": 0, "cards": [], "elapsed_ms": round((time.perf_counter() - started) * 1000, 3)}
+        return {**_empty_search("FAILED", query, started), "error_type": type(exc).__name__}
+
+
+def export_manual(project_id: str, *, db_path: str | Path | None = None, card_ids: list[str] | None = None) -> dict:
+    """Return Markdown and reviewed card identities; the caller controls file output."""
+    path = db_location(db_path)
+    if not path.is_file():
+        raise FileNotFoundError("Manual export requires an existing incident DB")
+    with IncidentStore(path) as store:
+        return store.export_manual(project_id, card_ids=card_ids)
+
+
+def _applicability_recheck(card: dict, result: dict) -> tuple[str, list[str]]:
+    expected = card.get("applicability") or _applicability({"project_id": card["project_id"], "run_id": card["source_run_id"],
+        "scope": card.get("scope", {}), "version_provenance": card.get("version_provenance", {})})
+    actual = _applicability(result)
+    mismatch, missing = [], []
+    if expected.get("project_id") != actual["project_id"]:
+        mismatch.append("현재 프로젝트가 과거 카드의 적용 프로젝트와 다릅니다")
+    for key in ("service", "environment", "operation", "method", "path"):
+        before, now = expected.get(key), actual.get(key)
+        if key == "path":
+            before, now = _path(before) if before else None, _path(now) if now else None
+        if before and now and before != now:
+            mismatch.append(f"현재 {key} 조건이 과거 카드의 적용 조건과 다릅니다")
+        elif not before or not now:
+            missing.append(f"과거 또는 현재 {key} 적용 조건을 확인하지 못했습니다")
+    if not expected.get("path") and not expected.get("operation") or not actual.get("path") and not actual.get("operation"):
+        missing.append("과거 또는 현재 동작·경로 적용 조건을 확인하지 못했습니다")
+    past_versions, current_versions = card.get("version_provenance", {}), result.get("version_provenance", {})
+    past_runtime, current_runtime = past_versions.get("runtime", {}), current_versions.get("runtime", {})
+    before_sha = _sha(past_runtime.get("sha")) if past_runtime.get("status") == "OBSERVED" else None
+    now_sha = _sha(current_runtime.get("sha")) if current_runtime.get("status") == "OBSERVED" else None
+    if not before_sha or not now_sha:
+        missing.append("과거 또는 현재 실제 실행 버전이 관측되지 않았습니다")
+    elif not _same_sha(before_sha, now_sha):
+        mismatch.append("현재 실행 버전이 과거 카드 출처의 실행 버전과 다릅니다")
+    if past_versions.get("comparison") == "MISMATCH" or current_versions.get("comparison") == "MISMATCH":
+        mismatch.append("출처 또는 현재 실행의 로컬 코드와 실제 실행 버전이 다릅니다")
+    for key in ("runtime_sha", "local_sha"):
+        before, now = expected.get(key), actual.get(key)
+        if before and now and not _same_sha(before, now):
+            mismatch.append(f"현재 {key}가 검토된 버전 조건과 다릅니다")
+        elif before and not now:
+            missing.append(f"현재 {key} 조건을 관측하지 못했습니다")
+    before_contract = expected.get("contract_versions", card.get("contract_analysis", {}).get("versions", {}))
+    now_contract = actual["contract_versions"]
+    if before_contract or now_contract:
+        if before_contract.get("status") == "MISMATCH" or now_contract.get("status") == "MISMATCH":
+            mismatch.append("출처 또는 현재 계약·DTO·호출자 버전 관측이 충돌합니다")
+        for component in ("runtime", "code", "contract", "dto", "caller"):
+            before, now = before_contract.get(component), now_contract.get(component)
+            if not before or not now:
+                missing.append(f"과거 또는 현재 {component} 계약 근거 버전을 확인하지 못했습니다")
+            elif not (_same_sha(_sha(before), _sha(now)) if _sha(before) and _sha(now) else before == now):
+                mismatch.append(f"현재 {component} 계약 근거 버전이 과거 출처와 다릅니다")
+    if any(item.get("origin") == "REVIEW_EDIT" for item in card.get("disproof_conditions", [])):
+        missing.append("검토 정정된 반증 문구는 현재 자료로 별도 확인해야 합니다")
+    for item in card.get("invalid_conditions", []):
+        states = []
+        for key, value in item["when"].items():
+            now = actual.get(key)
+            states.append(None if now is None else _same_sha(value, now) if key.endswith("_sha") else value == now)
+        if False in states:
+            continue
+        if None in states:
+            missing.append("검토된 부적합 조건의 현재 값을 확인하지 못했습니다")
+        else:
+            mismatch.append("검토된 부적합 조건에 해당합니다: " + item["reason"])
+    if card.get("observed_features", {}).get("observations_complete") is not True:
+        missing.append("과거 출처의 관측 범위 완전성을 확인하지 못했습니다")
+    if card.get("observed_features", {}).get("conflicts"):
+        mismatch.append("과거 출처에 관측 충돌이 보존돼 있습니다")
+    return ("MISMATCH" if mismatch else "NOT_OBSERVED" if missing else "MATCH", [*mismatch, *missing])
 
 
 def recheck_memory(search: dict, result: dict) -> dict:
     """Record checks against this run, without changing its rules or hypotheses."""
     search = deepcopy(search)
+    if search.get("status") == "DISABLED":
+        search.update(strategy="NONE", hit_count=0, cards=[], current_recheck={}, rechecks=[])
+        return search
     observed = current_signals(result)
     aggregate = result.get("log_scope", {}).get("aggregate", {})
-    refs = [{"run_id": result["run_id"], "evidence_id": item["id"]} for item in result.get("observations", [])]
+    refs = [{"run_id": result["run_id"], "evidence_id": item["id"]} for item in result.get("observations", []) if item.get("run_id", result["run_id"]) == result["run_id"]]
     search["current_recheck"] = {
         "run_id": result["run_id"], "request_connection": {key: result.get(key) for key in ("trace_id", "correlation", "correlation_basis")},
-        "logs": {"connected": result.get("log_scope", {}).get("connected", False), "aggregate": aggregate, "reads": [step for step in result.get("steps", []) if step["tool"] == "find_logs"], "verified_count": sum(item.get("kind") == "log" and item.get("scope_status") == "VERIFIED" for item in result.get("observations", []))},
+        "logs": {"connected": result.get("log_scope", {}).get("connected", False), "aggregate": aggregate, "reads": [step for step in result.get("steps", []) if step["tool"] == "find_logs"], "verified_count": sum(item.get("kind") == "log" and item.get("scope_status") == "VERIFIED" and item.get("run_id", result["run_id"]) == result["run_id"] for item in result.get("observations", []))},
         "version_provenance": result.get("version_provenance", {}), "evidence_refs": refs,
     }
     search["rechecks"] = []
     for card in search.get("cards", [])[:2]:
         status, reasons = "NOT_REVALIDATED", []
-        if result.get("correlation") != "EXACT_ID" or result["route"] == "REQUEST_CONTEXT" or aggregate.get("conflicts") or not aggregate.get("complete", True):
+        guidance_observed = False
+        if card.get("review", {}).get("status") not in REUSABLE:
+            status = "REJECTED"
+            reasons.append("카드가 미검토 또는 폐기 상태입니다")
+        elif result.get("correlation") != "EXACT_ID" or result["route"] == "REQUEST_CONTEXT" or aggregate.get("conflicts") or aggregate.get("complete") is not True:
             reasons.append("현재 요청 연결·관측 범위가 부족하거나 충돌합니다")
         elif result.get("observed_status") is not None and card.get("observed_status") is not None and result["observed_status"] != card["observed_status"]:
             status = "REJECTED"
@@ -572,19 +1006,21 @@ def recheck_memory(search: dict, result: dict) -> dict:
         elif result.get("diagnosis_type") not in (None, "unknown") and card.get("diagnosis_type") not in (None, "unknown") and result["diagnosis_type"] != card["diagnosis_type"]:
             status = "REJECTED"
             reasons.append("현재 규칙 관측의 진단 유형이 과거 사례와 다릅니다")
-        elif result["run_status"] in {"TIMED_OUT", "PARTIAL_FAILURE", "BUDGET_EXHAUSTED"}:
+        elif result["run_status"] != "COMPLETED":
             reasons.append("현재 조사가 중단되거나 일부 자료를 확인하지 못했습니다")
         elif card["card_kind"] == "GUIDANCE" and result["route"] == "GUIDANCE" and search["current_recheck"]["logs"]["verified_count"]:
             status = "CURRENT_GUIDANCE_OBSERVED"
+            guidance_observed = True
             reasons.append("새 요청의 현재 로그·계약으로 안내를 독립 판정했습니다. 원인·수정 검증이 아닙니다")
         else:
             reasons.append("과거 가설은 현재 원인으로 검증되지 않았습니다")
-        if result.get("version_provenance", {}).get("runtime", {}).get("status") != "OBSERVED":
-            reasons.append("현재 실행 버전은 관측되지 않았습니다")
-        elif result.get("version_provenance", {}).get("comparison") == "MISMATCH":
+        applicability, condition_reasons = _applicability_recheck(card, result)
+        if applicability != "MATCH" and status != "REJECTED":
             status = "NOT_REVALIDATED"
-            reasons.append("현재 로컬 코드와 실행 버전이 다릅니다")
-        search["rechecks"].append({"card_id": card["card_id"], "source_run_id": card["source_run_id"], "status": status, "reasons": reasons, "current_evidence_refs": refs[:4]})
+        reasons.extend(condition_reasons)
+        search["rechecks"].append({"card_id": card["card_id"], "source_run_id": card["source_run_id"], "status": status,
+            "reasons": reasons, "applicability_status": applicability, "current_guidance_observed": guidance_observed,
+            "usable_as_current_evidence": False, "current_evidence_refs": refs[:4]})
     return search
 
 

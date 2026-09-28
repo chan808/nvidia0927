@@ -1,0 +1,76 @@
+{
+  "status": "LOCAL_INTEGRATED_DRAFT",
+  "recorded_at": "2026-09-28T14:54:26.957186+00:00",
+  "regression": {
+    "passed": 499,
+    "failed": 0,
+    "seconds": 174.74,
+    "junit_sha256": "2896cdc5a250c3563ebc753124eb341d63184bcdd5bdb694d92090c911161bf6",
+    "scope": "Whole suite before JSONL packaging inclusion correction; corrected packaging verified by 27 focused tests and clean archive replay"
+  },
+  "protected_files": {
+    "examples/seed_signup/api.py": true,
+    "examples/seed_signup/cases.json": true,
+    "examples/seed_signup/checks.py": true,
+    "examples/seed_signup/client.py": true,
+    "examples/seed_signup/events.json": true,
+    "examples/seed_signup/README.md": true,
+    "examples/change_policy/seed-signup-a2-v1.json": true
+  },
+  "evaluation": {
+    "rules|diagnosis_only|TEST_DOUBLE": {
+      "executions": {
+        "COMPLETED": 12
+      },
+      "assessments": {
+        "PASS": 10,
+        "FAIL": 2
+      }
+    },
+    "single_prompt|not_run|not_run": {
+      "executions": {
+        "BLOCKED": 12
+      },
+      "assessments": {
+        "NOT_RUN": 12
+      }
+    },
+    "coding_agent|not_run|not_run": {
+      "executions": {
+        "BLOCKED": 12
+      },
+      "assessments": {
+        "NOT_RUN": 12
+      }
+    },
+    "tracebridge_memory_off|diagnosis_only|TEST_DOUBLE": {
+      "executions": {
+        "COMPLETED": 11,
+        "FAILED": 1
+      },
+      "assessments": {
+        "PASS": 12
+      }
+    },
+    "tracebridge_memory_on|diagnosis_only|TEST_DOUBLE": {
+      "executions": {
+        "COMPLETED": 11,
+        "FAILED": 1
+      },
+      "assessments": {
+        "PASS": 12
+      }
+    }
+  },
+  "fresh_dependency_install_verified": false,
+  "new_external_model_calls": 0,
+  "real_incident_verified": false,
+  "original_applied": false,
+  "external_submission_performed": false,
+  "archive_replay_record": "ZIP-adjacent .verification.json",
+  "packaging_followup": {
+    "passed": 27,
+    "failed": 0,
+    "seconds": 5.14
+  }
+}

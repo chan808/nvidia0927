@@ -18,6 +18,7 @@ from .change_policy import CASE_KIND, COMMANDS, LIMITATIONS, PolicyDenied, autho
 from .change_proposal import NemotronProposer, validate_proposal
 from .incident_memory import IncidentStore, db_location, persist_result
 from .report_intake import LocalEventCatalog, triage_report
+from .report_contract import action_preference
 
 
 DEFAULT_POLICY = "seed-signup-a2-v1"
@@ -36,10 +37,13 @@ def seed_incident(report: str = "씨드 개발 회원가입이 실패해요. req
     policy, digest = load_policy(DEFAULT_POLICY, workspace)
     files = read_source(policy, workspace)
     catalog = LocalEventCatalog(json.loads(files["events.json"]))
+    from .seed_project import bind_seed_catalog
+    catalog = bind_seed_catalog(catalog, policy, files, workspace)
     catalog.locator = str(safe_path(workspace, policy.source_root + "/events.json", file=True))
     result = triage_report(report, catalog)
     result.update(case_kind=CASE_KIND, development_target={"target_id": policy.target_id,
                   "snapshot_sha256": policy.snapshot_sha256, "source_origin": policy.source_origin},
+                  requested_action=action_preference(report) or "UNSPECIFIED",
                   executed_at=datetime.now(timezone.utc).isoformat())
     return persist_result(result, _database(workspace, db_path))
 
@@ -148,6 +152,35 @@ def _work_run(source: dict, job: dict, revision: int) -> dict:
     return result
 
 
+def _recheck_source(source: dict, policy, digest: str, workspace: Path, database: Path) -> None:
+    """Recheck saved scope, latest answer, policy and current seed before execution."""
+    current_policy, current_digest = load_policy(policy.policy_id, workspace)
+    if current_digest != digest or current_policy != policy:
+        raise PolicyDenied("Registered policy changed during preparation")
+    current_files = read_source(current_policy, workspace)
+    with IncidentStore(database) as store:
+        current = store.get_run(source["project_id"], source["run_id"])
+        incident = store.get_incident(source["project_id"], source["incident_id"])
+        if incident["latest_run_id"] != source["run_id"] or json_bytes(current) != json_bytes(source):
+            raise PolicyDenied("Current incident changed during preparation")
+        if store.list_changes(source["project_id"], source["incident_id"]):
+            raise PolicyDenied("This incident already has a preparation attempt")
+    authorize_source(current, current_policy)
+    from .seed_project import bind_seed_catalog, seed_catalog
+
+    # The pinned snapshot and later captured actions are separate registered
+    # observations. Captures must not make the original snapshot disappear.
+    snapshot_catalog = LocalEventCatalog(json.loads(current_files["events.json"]))
+    fresh_catalog = (bind_seed_catalog(snapshot_catalog, current_policy, current_files, workspace)
+                     if source.get("trace_id") in snapshot_catalog.events else seed_catalog(workspace))
+
+    fresh = triage_report("requestId=" + str(source.get("trace_id", "")), fresh_catalog, **{
+        key: source.get("scope", {}).get(key) for key in ("service", "environment", "occurred_at")})
+    fresh.update(case_kind=source.get("case_kind"), development_target=source.get("development_target"),
+                 requested_action=source.get("requested_action"))
+    authorize_source(fresh, current_policy)
+
+
 def prepare_change(project_id: str, source_run_id: str, *, policy_id: str = DEFAULT_POLICY, db_path=None,
                    live: bool = False, proposer=None, workspace: Path | None = None) -> dict:
     """Internal developer entry point. Injected proposers are always labeled TEST_DOUBLE."""
@@ -159,9 +192,30 @@ def prepare_change(project_id: str, source_run_id: str, *, policy_id: str = DEFA
         if existing:
             return {"job": existing, "run": store.get_run(project_id, existing["result_run_id"]), "persistence": {"status": "ALREADY_SAVED"}}
         incident = store.get_incident(project_id, source["incident_id"])
+        prior_attempts = store.list_changes(project_id, source["incident_id"])
+    if prior_attempts:
+        raise PolicyDenied("This incident already has a preparation attempt; review or retry saving that result")
+    # A reservation outlives a failed SQLite write. Retrying this entry point can
+    # only save the obtained result; it cannot run a second model/check attempt.
+    reservations = safe_path(workspace, "output/changes/attempts")
+    reservations.mkdir(parents=True, exist_ok=True)
+    attempt_key = sha256(json_bytes([str(database.resolve()), project_id, source_run_id]))
+    reservation = reservations / (attempt_key + ".json")
+    if reservation.exists():
+        previous = json.loads(reservation.read_bytes())
+        if previous.get("source_record_sha256") != sha256(json_bytes(source)):
+            raise PolicyDenied("The source of the obtained attempt changed")
+        obtained = safe_path(workspace, previous["artifact_ref"], file=True)
+        cached = json.loads(obtained.read_bytes())
+        return persist_change_result(cached, database)
     work_id, result_run_id = uuid4().hex, uuid4().hex
     relative = "output/changes/" + work_id
     artifact = safe_path(workspace, relative)
+    try:
+        with reservation.open("x", encoding="utf-8") as stream:
+            json.dump({"source_record_sha256": sha256(json_bytes(source)), "artifact_ref": relative + "/result.json"}, stream)
+    except FileExistsError:
+        raise PolicyDenied("A preparation attempt is already running for this source") from None
     artifact.mkdir(parents=True, exist_ok=False)
     candidate = artifact / "candidate"
     job = {"record_format": "change_job_v1", "work_id": work_id, "project_id": project_id, "incident_id": source["incident_id"],
@@ -184,6 +238,7 @@ def prepare_change(project_id: str, source_run_id: str, *, policy_id: str = DEFA
             raise PolicyDenied("Only the latest unmodified source run can start preparation")
         authorize_source(source, policy)
         baseline = read_source(policy, workspace)
+        _recheck_source(source, policy, digest, workspace, database)
         job["policy"]["decision"] = "ALLOWED"
         deadline = started + policy.total_seconds
         job["baseline"] = {"version": policy.baseline_version, "snapshot_sha256": policy.snapshot_sha256,
@@ -198,6 +253,7 @@ def prepare_change(project_id: str, source_run_id: str, *, policy_id: str = DEFA
         job["execution"] = {"mode": policy.execution_mode, "openshell_verified": False, "os_sandbox": False,
                             "environment": env, "check_ids": policy.check_ids, "max_attempts": policy.max_attempts,
                             "total_seconds": policy.total_seconds, "network_enforcement": "NONE_TRUSTED_SOURCE_ONLY"}
+        _recheck_source(source, policy, digest, workspace, database)
         before = run_registered_check(policy, policy.check_ids[0], workspace=workspace, candidate=candidate, artifact=artifact,
                                       expected=baseline, env=env, phase="before", deadline=deadline)
         job["checks"].append(before)
@@ -220,6 +276,7 @@ def prepare_change(project_id: str, source_run_id: str, *, policy_id: str = DEFA
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError("Preparation budget exhausted before proposal")
+            _recheck_source(source, policy, digest, workspace, database)
             attempt = {"attempt": 1, "status": "REQUESTED"}
             job["attempts"].append(attempt)
             job["status"] = "MODEL_FAILED"
@@ -239,7 +296,7 @@ def prepare_change(project_id: str, source_run_id: str, *, policy_id: str = DEFA
             expected, diff, edit = validate_proposal(raw, policy, baseline, set(context["evidence_ids"]))
             job["policy"]["edit_decision"] = "ALLOWED"
             _candidate_files(workspace, candidate, baseline)
-            read_source(policy, workspace)
+            _recheck_source(source, policy, digest, workspace, database)
             _write(artifact / "proposal.json", edit.pop("proposal"))
             (artifact / "candidate.diff").write_bytes(diff.encode())
             job["diff"] = {"ref": relative + "/candidate.diff", "sha256": sha256(diff.encode()), **edit}
@@ -249,6 +306,7 @@ def prepare_change(project_id: str, source_run_id: str, *, policy_id: str = DEFA
             job["candidate"] = {"version": snapshot_hash(expected), "snapshot_sha256": snapshot_hash(expected),
                                 "file_hashes": {name: sha256(raw) for name, raw in expected.items()}, "root": relative + "/candidate"}
             job["status"] = "VERIFICATION_FAILED"
+            _recheck_source(source, policy, digest, workspace, database)
             after = run_registered_check(policy, policy.check_ids[0], workspace=workspace, candidate=candidate, artifact=artifact,
                                          expected=expected, env=env, phase="after", deadline=deadline)
             job["checks"].append(after)
@@ -257,6 +315,7 @@ def prepare_change(project_id: str, source_run_id: str, *, policy_id: str = DEFA
             elif after["status"] == "TIMED_OUT":
                 job["status"] = "TIMED_OUT"
             else:
+                _recheck_source(source, policy, digest, workspace, database)
                 regression = run_registered_check(policy, policy.check_ids[1], workspace=workspace, candidate=candidate, artifact=artifact,
                                                   expected=expected, env=env, phase="regression", deadline=deadline)
                 job["checks"].append(regression)
@@ -267,7 +326,7 @@ def prepare_change(project_id: str, source_run_id: str, *, policy_id: str = DEFA
                 elif regression["status"] == "TIMED_OUT":
                     job["status"] = "TIMED_OUT"
                 elif identical and after["status"] == regression["status"] == "PASSED":
-                    read_source(policy, workspace)
+                    _recheck_source(source, policy, digest, workspace, database)
                     job.update(status="CHANGE_PREPARED", candidate_fix_verified=True)
                 attempt["status"] = job["status"]
     except Exception as exc:
@@ -288,7 +347,10 @@ def prepare_change(project_id: str, source_run_id: str, *, policy_id: str = DEFA
         except (OSError, ValueError):
             job.update(original_unchanged=False, candidate_fix_verified=False, status="POLICY_REJECTED")
     job.update(finished_at=datetime.now(timezone.utc).isoformat(), elapsed_ms=round((time.monotonic() - started) * 1000))
-    result = {"job": job, "run": _work_run(source, job, incident["latest_revision"] + 1)}
+    with IncidentStore(database) as store:
+        latest = store.get_incident(project_id, source["incident_id"])
+        work_context = store.get_run(project_id, latest["latest_run_id"])
+    result = {"job": job, "run": _work_run(work_context, job, latest["latest_revision"] + 1)}
     _write(artifact / "result.json", result)
     persist_change_result(result, database)
     _write(artifact / "result.json", result)

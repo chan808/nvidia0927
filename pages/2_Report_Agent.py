@@ -8,10 +8,11 @@ from dotenv import load_dotenv
 import streamlit as st
 
 from tracebridge.report_agent import confirm_candidate, investigate_submission, nvidia_settings
-from tracebridge.report_contract import KST, ReportContext, event_time
-from tracebridge.incident_memory import IncidentStore, db_location, persist_result
+from tracebridge.report_contract import KST, ReportContext, event_time, presentation_status
+from tracebridge.incident_memory import IncidentStore, db_location, persist_result, export_manual
+from tracebridge.project_profile import load_project_profile
 from tracebridge.project_sources import agolive_repo_path, validate_agolive_repo
-from tracebridge.report_service import auto_prepare_submission, follow_up_service as follow_up_submission, prepare_submission
+from tracebridge.report_service import auto_prepare_submission, follow_up_service as follow_up_submission, prepare_submission, preparation_blockers
 from tracebridge.change_worker import persist_change_result
 from tracebridge.change_policy import WORKSPACE, safe_path
 from tracebridge.seed_project import capture_seed_action
@@ -22,9 +23,18 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 st.title("제보 에이전트")
 st.caption("증상을 한 줄로 적거나 사진만 첨부해도 됩니다. 화면·동작·대략적인 시각을 단서로 조사합니다.")
 profiles = ["Agolive", "등록된 개발 가입 사례 (씨드)"]
+configured_profile = None
+if profile_path := os.getenv("TRACEBRIDGE_PROJECT_PROFILE"):
+    try:
+        configured_profile = load_project_profile(profile_path)
+        profiles.append(configured_profile.project_id + " (등록 프로젝트)")
+    except (OSError, ValueError):
+        st.error("등록 프로젝트 설정을 읽지 못했습니다. 관리자에게 연결 설정 확인을 요청해 주세요.")
+        st.stop()
 default_seed = os.getenv("TRACEBRIDGE_SERVICE_PROJECT", "seed" if not os.getenv("TRACEBRIDGE_AGOLIVE_REPO") and not os.getenv("TRACEBRIDGE_EVENTS_FILE") else "agolive") == "seed"
-profile = st.selectbox("연결된 프로젝트", profiles, index=1 if default_seed else 0, key="report_project")
+profile = st.selectbox("연결된 프로젝트", profiles, index=2 if configured_profile else 1 if default_seed else 0, key="report_project")
 seed = profile == profiles[1]
+custom_project = bool(configured_profile and profile == profiles[2])
 if st.session_state.get("active_report_project") != profile:
     st.session_state.active_report_project = profile
     st.session_state.report_agent_result = None
@@ -35,7 +45,7 @@ if st.session_state.get("active_report_project") != profile:
 repo = None
 if seed:
     st.caption("통제된 개발 씨드 사례입니다. 가입 동작과 별도 사본의 수정안을 검증하며 원본 적용은 검토 대기로 남깁니다.")
-else:
+elif not custom_project:
     try:
         repo = validate_agolive_repo(agolive_repo_path())
     except (OSError, ValueError):
@@ -58,11 +68,19 @@ environment = {"개발 환경": "dev", "스테이징": "staging", "운영 서비
 use_nvidia = st.checkbox("제보·사진과 선별된 코드·로그를 NVIDIA 분석 서비스에 전송", disabled=not bool(key), key="use_nvidia_analysis")
 if not key:
     st.info("현재는 로컬 관측 대조와 코드 검색이 가능합니다. 사진 해석은 NVIDIA 연결 설정이 필요합니다.")
-include_docker = st.checkbox("연결된 로컬 컨테이너 로그 조회", value=False, disabled=seed)
+include_docker = st.checkbox("연결된 로컬 컨테이너 로그 조회", value=False, disabled=seed or custom_project)
+memory_enabled = st.checkbox("검토된 과거 사건을 조사 단서로 검색", value=True, key="report_memory_enabled")
+if not memory_enabled:
+    st.caption("이번 조사에 과거 카드를 전달하지 않습니다. 현재 사건의 저장은 계속됩니다.")
 automatic = st.checkbox("작업 후보이면 허용된 수정안까지 준비", value=False, disabled=not seed or not use_nvidia, key="automatic_seed_change")
 options = {"repo": repo, "use_nvidia": use_nvidia, "include_docker_logs": include_docker if not seed else False}
 if seed:
     options = {"registered_seed": True, "use_nvidia": use_nvidia}
+elif custom_project:
+    options = {"project_profile": configured_profile, "use_nvidia": use_nvidia}
+options.update(memory_enabled=memory_enabled, db_path=db_location())
+if metrics_dir := os.getenv("TRACEBRIDGE_METRICS_DIR"):
+    options["observer_output_dir"] = Path(metrics_dir)
 
 
 def save_active(new_result):
@@ -115,11 +133,21 @@ if seed:
 result = st.session_state.get("report_agent_result")
 if result:
     route_labels = {"GUIDANCE": "입력·동작 안내", "REQUEST_CONTEXT": "추가 정보 대기", "INVESTIGATE": "추가 조사", "WORK_CANDIDATE": "담당자 작업 검토 후보"}
-    run_labels = {"COMPLETED": "이번 판정 완료", "WAITING_CONTEXT": "정보 대기", "PARTIAL_FAILURE": "일부 조회 실패", "TIMED_OUT": "시간 초과", "BUDGET_EXHAUSTED": "호출 한도 도달"}
+    run_labels = {"COMPLETED": "이번 조사 종료", "WAITING_CONTEXT": "정보 대기", "PARTIAL_FAILURE": "일부 조회 실패", "TIMED_OUT": "시간 초과", "BUDGET_EXHAUSTED": "호출 한도 도달"}
     st.subheader(route_labels[result["route"]])
     st.write(result["summary"].replace(" 재현 테스트는 아직 실행하지 않았습니다.", ""))
     st.info(result["route_reason"])
     st.write("조사 실행: " + run_labels[result["run_status"]])
+    status = presentation_status(result, (st.session_state.get("report_agent_change") or {}).get("job"))
+    agreement = {"MATCHED": "현재 응답과 일치", "CONTRADICTED": "현재 응답과 다름", "UNVERIFIABLE": "확인 대기"}
+    st.write("제보의 HTTP 상태:", status["reported_http_status"] or "미입력", "·", agreement.get(status["report_status_verification"], "확인 대기"))
+    st.write("현재 관측 응답:", ", ".join(str(value) for value in status["observed_http_statuses"]) or "미관측")
+    st.write("실제 증상:", {"REQUEST_REJECTED": "요청 실패 관측", "SERVER_ERROR_OBSERVED": "서버 오류 응답 관측",
+             "HTTP_SUCCESS_OBSERVED": "HTTP 성공 응답 관측", "UNOBSERVED": "현재 증상 관측 대기"}.get(status["actual_symptom_status"], "현재 근거 확인 필요"))
+    st.write("제품 판단:", {"CALLER_DEFECT_OBSERVED": "호출자 결함 근거 확보", "MIGRATION_MISMATCH_OBSERVED": "마이그레이션 불일치 근거 확보",
+             "UNCONFIRMED": "제품 정상·결함 미확정"}.get(status["product_status"], "현재 근거 확인 필요"))
+    if status["collection_status"] == "INCOMPLETE" or status["observations_conflict"]:
+        st.warning("관측이 불완전하거나 충돌해 안내·작업을 확정할 수 없습니다. 확보한 기록을 유지하며 추가 자료를 확인합니다.")
     if result.get("persistence", {}).get("status") == "FAILED":
         st.warning("조사 결과는 확보했지만 사건 기록을 저장하지 못했습니다. 아래 버튼으로 현재 결과의 저장만 재시도할 수 있습니다.")
         if st.button("이 결과 저장만 재시도", key="retry_incident_save"):
@@ -135,7 +163,7 @@ if result:
             environment_name = {"dev": "개발 환경", "staging": "스테이징", "prod": "운영 서비스"}.get(scope.get("environment"), "환경 미확인")
             return " · ".join([scope.get("operation", "동작"), time_label(scope.get("occurred_at")), environment_name])
         selected = st.selectbox("문제가 난 동작 기록", list(candidates), format_func=action_label, key="report_candidate")
-        if st.button("이 동작이 맞아요", key="confirm_report_candidate"):
+        if st.button("이 동작이 맞아요", key="confirm_report_candidate", disabled=status["collection_status"] == "INCOMPLETE" or status["observations_conflict"]):
             try:
                 with st.spinner("확인한 동작의 현재 관측을 다시 대조합니다..."):
                     save_active(confirm_candidate(result, selected, **options))
@@ -164,7 +192,10 @@ if result:
         except Exception:
             st.error("답변을 반영하지 못했습니다. 이미 확보한 조사 결과는 유지됩니다.")
     if seed and result["route"] == "WORK_CANDIDATE" and not st.session_state.get("report_agent_change"):
-        if st.button("허용된 수정안 준비", disabled=not use_nvidia, key="prepare_report_change"):
+        blockers = preparation_blockers(result)
+        if blockers:
+            st.caption("수정안 준비 대기: " + ", ".join(blockers))
+        if st.button("허용된 수정안 준비", disabled=not use_nvidia or bool(blockers), key="prepare_report_change"):
             try:
                 with st.spinner("별도 사본에 수정안을 만들고 같은 검사와 회귀를 실행합니다..."):
                     st.session_state.report_agent_change = prepare_submission(result, live=True)
@@ -209,6 +240,10 @@ if result:
                     store.review_card(result["project_id"], card_id, {"승인": "approve", "반려": "reject"}[action], reviewer=reviewer)
                 st.rerun()
             st.caption("검토된 카드는 다음 사건의 단서로 검색됩니다. 승인 상태와 원인·수정 검증 상태는 별개입니다.")
+            manual = export_manual(result["project_id"], db_path=db_location())
+            st.download_button("검토된 프로젝트 매뉴얼 내려받기", manual["markdown"],
+                               file_name="incident-manual.md", mime="text/markdown", key="download_incident_manual")
+            st.write("매뉴얼의 검토 카드:", manual["card_count"], "개")
         except (ValueError, OSError, sqlite3.Error):
             st.warning("사건 카드를 조회하지 못했습니다. 현재 결과의 저장 상태를 확인해 주세요.")
     with st.expander("개발자 조사 기록"):
@@ -218,6 +253,8 @@ if result:
         st.json(result.get("memory_search", {}))
         st.json(result["version_provenance"])
         st.json(result["log_scope"])
+        st.json(status)
+        st.json(result.get("observability", result.get("log_scope", {}).get("observability", {})))
         st.write(f"이 접수·조사의 모델 호출: {result['model_calls']}회 · 사용량: {result['usage']}")
         if prepared:
             st.write("수정 제안의 모델 호출:", prepared["job"]["model"]["actual_calls"], "회 · 사용량:", prepared["job"]["model"].get("usage", {}))
@@ -236,7 +273,7 @@ if result:
 
 with st.sidebar.expander("저장된 사건 이어보기"):
     try:
-        project_id = result["project_id"] if result else "tracebridge-seed-signup" if seed else "agolive"
+        project_id = result["project_id"] if result else "tracebridge-seed-signup" if seed else configured_profile.project_id if custom_project else "agolive"
         with IncidentStore() as store:
             incidents = store.list_incidents(project_id)
         if incidents:

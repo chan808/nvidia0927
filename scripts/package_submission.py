@@ -1,10 +1,14 @@
-"""Create a single-file source portfolio without local secrets or build artifacts."""
+"""Build a reviewable DRAFT archive without DBs, secrets or local output."""
 
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
+import hashlib
+import json
 from pathlib import Path
 import re
+from uuid import uuid4
 from zipfile import ZIP_DEFLATED, ZipFile
 
 
@@ -24,11 +28,18 @@ TOP_LEVEL = [
     "requirements.txt",
 ]
 DIRECTORIES = ["tracebridge", "scripts", "tests", "skills", "docs", "pages", "examples"]
-SOURCE_SUFFIXES = {".py", ".md", ".json", ".yml", ".yaml", ".toml", ".kts", ".kt", ".go", ".mod", ".log"}
+SOURCE_SUFFIXES = {".py", ".md", ".json", ".jsonl", ".yml", ".yaml", ".toml", ".kts", ".kt", ".go", ".mod", ".log", ".lock"}
+EXCLUDED_PARTS = {"tmp", "temp", "output", "generated", "submission", "__pycache__", ".pytest_cache",
+                  ".git", ".venv", ".uv-cache", "node_modules", ".codex", ".agents", ".codex-remote-attachments"}
+SECRET_NAMES = re.compile(r"^(?:\.env(?!\.example$).*|credentials?|secrets?|tokens?|passwords?|id_rsa|id_ed25519)(?:\..*)?$", re.I)
 
 
-def runtime_artifact(path: Path) -> bool:
-    if any(part in {"tmp", "temp", "output", "generated", "__pycache__", ".pytest_cache"} for part in path.relative_to(ROOT).parts):
+def runtime_artifact(path: Path, root: Path = ROOT) -> bool:
+    if any(part in EXCLUDED_PARTS or part.startswith("pytest-cache-files-") for part in path.relative_to(root).parts):
+        return True
+    if SECRET_NAMES.fullmatch(path.name) or path.suffix.lower() in {".pem", ".key", ".pfx", ".p12"}:
+        return True
+    if path.name.startswith(".") and path.name not in {".env.example", ".gitignore", ".gitattributes"}:
         return True
     if re.search(r"\.(?:db|sqlite3?|tmp|temp)(?:$|[-.])", path.name, re.I):
         return True
@@ -37,28 +48,66 @@ def runtime_artifact(path: Path) -> bool:
         return stream.read(16) == b"SQLite format 3\x00"
 
 
-def create_package(team_name: str) -> Path:
-    if not team_name or not re.fullmatch(r"[\w가-힣 -]{1,40}", team_name):
+def _safe_source(path: Path, root: Path) -> bool:
+    if not path.is_file() or path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
+        return False
+    if any(parent.is_symlink() for parent in path.parents if parent != root and parent.is_relative_to(root)):
+        return False
+    relative = path.relative_to(root)
+    permitted_image = relative.parts[:3] == ("examples", "evaluation", "assets") and path.suffix.lower() == ".png"
+    return (path.suffix.lower() in SOURCE_SUFFIXES or permitted_image) and not runtime_artifact(path, root)
+
+
+def create_package(team_name: str | None = None, *, output_dir: str | Path | None = None,
+                   root: str | Path | None = None) -> Path:
+    """Preserve the old team_name call; produce only isolated drafts."""
+    if team_name is not None and (not team_name or not re.fullmatch(r"[\w가-힣 -]{1,40}", team_name)):
         raise ValueError("Team name must contain only letters, numbers, Korean, spaces, _ or -")
-    destination = ROOT / "submission" / f"NVIDIA 해커톤_{team_name}_TraceBridge.zip"
-    destination.parent.mkdir(exist_ok=True)
-    sources = [ROOT / name for name in TOP_LEVEL]
+    root = Path(ROOT if root is None else root).resolve()
+    target_dir = Path(output_dir) if output_dir is not None else root / "output/parallel-d/packages"
+    if not target_dir.resolve().is_relative_to(root):
+        raise ValueError("Draft output must remain in the workspace")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    tag = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid4().hex[:8]
+    destination = target_dir / ("TraceBridge_DRAFT_" + (team_name + "_" if team_name else "") + tag + ".zip")
+    sources = {root / name for name in TOP_LEVEL if (root / name).is_file()}
+    sources.update(root.glob("requirements-*.lock"))
     for directory in DIRECTORIES:
-        sources.extend(
-            path for path in (ROOT / directory).rglob("*")
-            if path.is_file() and not path.is_symlink() and path.suffix in SOURCE_SUFFIXES
-            and path.resolve().is_relative_to(ROOT.resolve())
-            and not runtime_artifact(path)
-        )
-    with ZipFile(destination, "w", compression=ZIP_DEFLATED) as archive:
+        sources.update(path for path in (root / directory).rglob("*") if _safe_source(path, root))
+    sources = {path for path in sources if not path.is_symlink()
+               and path.resolve().is_relative_to(root) and not runtime_artifact(path, root)}
+    manifest = {"artifact_status": "DRAFT", "team_name": team_name,
+                "created_at": datetime.now(timezone.utc).isoformat(), "fresh_environment_verified": False,
+                "external_submission_performed": False, "source_changed_during_packaging": False, "files": {},
+                "limitations": ["Review archive; verification status is recorded in docs/main-integration.md when available",
+                    "No runtime DB, secret, prior evaluation result or local output is included",
+                    "New environment CLI/UI/restart verification remains a main integration gate"]}
+    with ZipFile(destination, "x", compression=ZIP_DEFLATED) as archive:
         for path in sorted(sources):
-            archive.write(path, path.relative_to(ROOT).as_posix())
+            name = path.relative_to(root).as_posix()
+            data = path.read_bytes()
+            manifest["files"][name] = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
+            archive.writestr(name, data)
+        manifest["source_changed_during_packaging"] = any(
+            not (root / name).is_file() or hashlib.sha256((root / name).read_bytes()).hexdigest() != item["sha256"]
+            for name, item in manifest["files"].items())
+        archive.writestr("DRAFT_PACKAGE_MANIFEST.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+        archive.writestr("DRAFT_NOTICE.md", "# DRAFT — 제출 전 검토용\n\n외부 제출을 수행하지 않은 검토용 묶음입니다. "
+                         "검증 범위는 docs/main-integration.md와 DRAFT_PACKAGE_MANIFEST.json을 확인하세요. "
+                         "평가·매뉴얼 자료는 출처가 붙은 합성 예시이며 실제 사건 해결 성능을 뜻하지 않습니다.\n")
+    destination.with_suffix(".manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     return destination
 
 
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Create a DRAFT package; no submission or deployment")
+    parser.add_argument("team_name", nargs="?", help="Exact team name only when already known")
+    parser.add_argument("--output-dir", default=None)
+    args = parser.parse_args(argv)
+    package = create_package(args.team_name, output_dir=args.output_dir)
+    print(f"DRAFT created: {package} ({package.stat().st_size:,} bytes)")
+    return 0
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("team_name", help="Exact team name used by both applicants")
-    args = parser.parse_args()
-    package = create_package(args.team_name)
-    print(f"Created {package} ({package.stat().st_size:,} bytes)")
+    raise SystemExit(main())

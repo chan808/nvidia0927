@@ -1,0 +1,191 @@
+{
+  "schema_version": 1,
+  "suite_id": "tracebridge-6x2-v2",
+  "artifact_status": "FROZEN_DRAFT_SYNTHETIC_SUITE",
+  "case_count": 12,
+  "resource_contract": "resources.json",
+  "initial_memory": "initial_memory.json",
+  "cases": [
+    {
+      "id": "validation-1",
+      "category": "normal_validation",
+      "variant": 1,
+      "input": "inputs/validation-1.json",
+      "expectation": "expectations/validation-1.json",
+      "source": {
+        "kind": "synthetic",
+        "description": "Controlled evaluation material authored for D; not a real incident or live execution",
+        "reference": "inputs/validation-1.json"
+      }
+    },
+    {
+      "id": "validation-2",
+      "category": "normal_validation",
+      "variant": 2,
+      "input": "inputs/validation-2.json",
+      "expectation": "expectations/validation-2.json",
+      "source": {
+        "kind": "synthetic",
+        "description": "Controlled evaluation material authored for D; not a real incident or live execution",
+        "reference": "inputs/validation-2.json"
+      }
+    },
+    {
+      "id": "contract-1",
+      "category": "contract_caller",
+      "variant": 1,
+      "input": "inputs/contract-1.json",
+      "expectation": "expectations/contract-1.json",
+      "source": {
+        "kind": "synthetic",
+        "description": "Controlled evaluation material authored for D; not a real incident or live execution",
+        "reference": "inputs/contract-1.json"
+      }
+    },
+    {
+      "id": "contract-2",
+      "category": "contract_caller",
+      "variant": 2,
+      "input": "inputs/contract-2.json",
+      "expectation": "expectations/contract-2.json",
+      "source": {
+        "kind": "synthetic",
+        "description": "Controlled evaluation material authored for D; not a real incident or live execution",
+        "reference": "inputs/contract-2.json"
+      }
+    },
+    {
+      "id": "ambiguous-1",
+      "category": "rough_text_photo",
+      "variant": 1,
+      "input": "inputs/ambiguous-1.json",
+      "expectation": "expectations/ambiguous-1.json",
+      "source": {
+        "kind": "synthetic",
+        "description": "Controlled evaluation material authored for D; not a real incident or live execution",
+        "reference": "inputs/ambiguous-1.json"
+      }
+    },
+    {
+      "id": "photo-2",
+      "category": "rough_text_photo",
+      "variant": 2,
+      "input": "inputs/photo-2.json",
+      "expectation": "expectations/photo-2.json",
+      "source": {
+        "kind": "synthetic",
+        "description": "Controlled evaluation material authored for D; not a real incident or live execution",
+        "reference": "inputs/photo-2.json"
+      }
+    },
+    {
+      "id": "incomplete-1",
+      "category": "incomplete_conflict",
+      "variant": 1,
+      "input": "inputs/incomplete-1.json",
+      "expectation": "expectations/incomplete-1.json",
+      "source": {
+        "kind": "synthetic",
+        "description": "Controlled evaluation material authored for D; not a real incident or live execution",
+        "reference": "inputs/incomplete-1.json"
+      }
+    },
+    {
+      "id": "conflict-2",
+      "category": "incomplete_conflict",
+      "variant": 2,
+      "input": "inputs/conflict-2.json",
+      "expectation": "expectations/conflict-2.json",
+      "source": {
+        "kind": "synthetic",
+        "description": "Controlled evaluation material authored for D; not a real incident or live execution",
+        "reference": "inputs/conflict-2.json"
+      }
+    },
+    {
+      "id": "memory-1",
+      "category": "past_similar_current_different",
+      "variant": 1,
+      "input": "inputs/memory-1.json",
+      "expectation": "expectations/memory-1.json",
+      "source": {
+        "kind": "synthetic",
+        "description": "Controlled evaluation material authored for D; not a real incident or live execution",
+        "reference": "inputs/memory-1.json"
+      }
+    },
+    {
+      "id": "memory-2",
+      "category": "past_similar_current_different",
+      "variant": 2,
+      "input": "inputs/memory-2.json",
+      "expectation": "expectations/memory-2.json",
+      "source": {
+        "kind": "synthetic",
+        "description": "Controlled evaluation material authored for D; not a real incident or live execution",
+        "reference": "inputs/memory-2.json"
+      }
+    },
+    {
+      "id": "adaptive-1",
+      "category": "adaptive_execution_failure",
+      "variant": 1,
+      "input": "inputs/adaptive-1.json",
+      "expectation": "expectations/adaptive-1.json",
+      "source": {
+        "kind": "synthetic",
+        "description": "Controlled evaluation material authored for D; not a real incident or live execution",
+        "reference": "inputs/adaptive-1.json"
+      }
+    },
+    {
+      "id": "failure-2",
+      "category": "adaptive_execution_failure",
+      "variant": 2,
+      "input": "inputs/failure-2.json",
+      "expectation": "expectations/failure-2.json",
+      "source": {
+        "kind": "synthetic",
+        "description": "Controlled evaluation material authored for D; not a real incident or live execution",
+        "reference": "inputs/failure-2.json"
+      }
+    }
+  ],
+  "sha256": {
+    "assets/signup-error.png": "2a6399c8f82da988efb203fa83dc3a3b26b9956a1a899cacdfec03d7b5948911",
+    "expectations/adaptive-1.json": "fbbc15e828942df566a618cb76872cd618bbfc3f1643bc99cca54b74a174032b",
+    "expectations/ambiguous-1.json": "52ced3cb0aa3a8c8c307ba2c773b74aa86e3d1330013f93a02966ca774c76d94",
+    "expectations/conflict-2.json": "00b64ee3363f07f848111b7b7b37340a0b2f084e981703a965a183e2bcc2485e",
+    "expectations/contract-1.json": "afa0b301ec3f9ac962ff1171f06e9505615f0bec9b52ed7a7b13c73a8ebedac2",
+    "expectations/contract-2.json": "1a3c21866acaddcd15390d632eb93eb07fc3ce853cc798a70f9a419344db874c",
+    "expectations/failure-2.json": "c14fb1e809300243b53758a24415850040a67616ab92674aca07749231659e88",
+    "expectations/incomplete-1.json": "e875a6244698fc9c23568092f54dbcdd60ec18e41931d00004913c47a85eb088",
+    "expectations/memory-1.json": "3ef909f9e3ccebb80994f86abe75183dfd4751cdea939c05abed5b4232825618",
+    "expectations/memory-2.json": "b086d29fea3c3dba7506559cf8861c45e56a944846a5e5c09986724fa31539b2",
+    "expectations/photo-2.json": "43b07ced91006653af234d7918578aa646a32e9bc0c4c4384ff355cdb191055e",
+    "expectations/validation-1.json": "bdbe7e29ea31c8b8e7420bc7426bbd523a51f22e61f4c8de8d5ddf23733ab64e",
+    "expectations/validation-2.json": "b1221347eb73bec7a320da553158bfb05d406d47081f3d060d8cf41743840b5b",
+    "initial_memory.json": "bacc2312ab21ffdcfd057ab26e91b324cf5695c4e6d18c1d2c778dabe9707404",
+    "inputs/adaptive-1.json": "cfad985820283fd0c6e3c63bb2a3a2bcabb20281271f367023cd5ca8f060f7a3",
+    "inputs/ambiguous-1.json": "073a0e1bf00b6b76293552e5bed2e9d0f5860669fe5075de69555f2fc537d0b2",
+    "inputs/conflict-2.json": "1749b470ce859478b0b4777a92b33ef55f4a07e6f3f8b8caa1b3b170993cffe4",
+    "inputs/contract-1.json": "e9532fefa6344c43b25aeae3b3b8a4b174dd3f3b8f8d55173ce5795ed032ba52",
+    "inputs/contract-2.json": "fc0593ca24b7bb85356fa62c840a2788719ddc5acc1a724523fb6719dac8e1fa",
+    "inputs/failure-2.json": "33085a192fcb80e869c852d7ddadb8fc072b76ddc1aca368aa7b301f65e2f366",
+    "inputs/incomplete-1.json": "1ecd868f3128f5625411f1af94f4cea88b6c9f33e4aae31b633cbd30c83bb719",
+    "inputs/memory-1.json": "505cd00acc9375ea5ff80ed9293f83b5002d936a3fcb122791ae6d0cd3e8488a",
+    "inputs/memory-2.json": "ec7bddc760aa7771b189635a34ee9287fa2f84181d3e6da8e0654df5eb939b82",
+    "inputs/photo-2.json": "785bb7a3275a62cc9c2a082c86418605f28c7edfd0583672d26375fa1880ad16",
+    "inputs/validation-1.json": "26fc1f365ebe23c3cc53daf10f4ee3cca5cd202e7bf3388ff17accea08ccf359",
+    "inputs/validation-2.json": "560d6db9bb8a860cfcb1bba7d7e7da742b51f8e95cfe8d4ed93d3be56dff971c",
+    "project/agolive-agent/pyproject.toml": "afd1f8ae271705a87da9cf1e783f976fb454a39b8a320367139422f640384bde",
+    "project/backend/build.gradle.kts": "7c0b8e22dc690098d840c42e851f662661305be9596de2251d118d37ca94157d",
+    "project/checks.py": "192b22b74e01c730a5596e1380345778d5ec76f219294478edd7e5fb38e8d86e",
+    "project/client.py": "850984c29140ee2ffdcb4bfd49e48fa37ce5de857ace6e141f7a54bfb99b4f1f",
+    "project/frontend/package.json": "17fc1c4ce0c492e7bf64ebefc66435017633086d40065fcb532e89c8a65eddda",
+    "project/frontend/src/client.py": "850984c29140ee2ffdcb4bfd49e48fa37ce5de857ace6e141f7a54bfb99b4f1f",
+    "project/openapi.json": "a8aedf8263850187813f54d6335d351851867f4004bec735326ed19586b0342e",
+    "project/realtime/go.mod": "c3d9f9b9869a963581e4a5a4c8be32419a2181d6950d30aa6aaa1efb2d5aabee",
+    "resources.json": "574a56f8a92b0fca77d20002f317c04fda5c720c26e90d2e5b59e5bbd6f48380"
+  }
+}

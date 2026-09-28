@@ -1,0 +1,48 @@
+{
+  "case_id": "memory-1",
+  "project_id": "tracebridge-evaluation",
+  "report": "방에 들어가면 실패해요. traceId=memory-1 HTTP 500",
+  "context": {
+    "environment": "dev",
+    "service": "evaluation-api",
+    "occurred_at": "2026-09-20T12:00:00+00:00"
+  },
+  "events": [
+    {
+      "trace": {
+        "trace_id": "memory-1",
+        "service": "evaluation-api",
+        "environment": "dev",
+        "occurred_at": "2026-09-20T12:00:00+00:00",
+        "method": "POST",
+        "path": "/rooms/enter",
+        "operation": "room_enter",
+        "version": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "code_version": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "request": {
+          "userId": "synthetic",
+          "displayName": "synthetic"
+        },
+        "response_status": 500
+      },
+      "logs": [
+        "TimeoutException: controlled synthetic failure"
+      ]
+    }
+  ],
+  "complete": true,
+  "model_double": [
+    {
+      "kind": "tool",
+      "name": "search_code",
+      "arguments": {
+        "terms": [
+          "TimeoutException"
+        ]
+      }
+    },
+    {
+      "kind": "finish"
+    }
+  ]
+}

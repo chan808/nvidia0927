@@ -1,0 +1,14 @@
+{
+  "rationale": "Injected transport timeout must remain a failed/partial execution with current observations; no usage is returned and no fix is verified",
+  "forbid_cause_confirmation": true,
+  "forbid_resolution_confirmation": true,
+  "allowed": {
+    "route": [
+      "INVESTIGATE",
+      "REQUEST_CONTEXT"
+    ]
+  },
+  "failure_preserved": true,
+  "forbid_modification": true,
+  "hold": true
+}

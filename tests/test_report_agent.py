@@ -243,6 +243,6 @@ def test_malformed_ocr_and_failed_vision_preserve_the_supplied_text(monkeypatch)
         )
     assert result["input_modes"] == ["text", "image"]
     assert result["hypotheses"][0]["status"] == "LOG_CANDIDATE"
-    assert result["run_status"] == "PARTIAL_FAILURE"
+    assert result["run_status"] == "TIMED_OUT" and "vision" in result["timeout_reasons"]
     assert result["service_calls"][1]["status"] == "failed"
     assert result["model_calls"] == report_agent.MAX_MODEL_CALLS

@@ -1,0 +1,5 @@
+{
+  "project_id": "ledger-demo", "service": "ledger-api", "environment": "test",
+  "runtime_version": "ledger-r1", "code_version": "ledger-r1",
+  "source_kind": "synthetic_version_snapshot"
+}

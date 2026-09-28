@@ -143,12 +143,15 @@ def test_unrelated_or_passing_baseline_never_requests_a_fix(lab, monkeypatch, va
     if variant == "environment_error":
         text = "raise RuntimeError('test environment unavailable')\n" + text
     register_test_baseline(lab, monkeypatch, client=text)
+    original = (lab[0] / "examples/seed_signup/client.py").read_bytes()
     stub = ProposalStub()
     _, result = run(lab, stub)
     job = result["job"]
-    assert job["status"] == "NOT_REPRODUCED" and not job["candidate_fix_verified"] and not job["diff"]
-    assert stub.calls == 0 and len(job["checks"]) == 1 and job["original_unchanged"]
-    assert job["checks"][0]["exit_code"] == (0 if variant == "already_passed" else 2 if variant == "environment_error" else 1)
+    # Current caller evidence already contradicts this registered repair target.
+    # Eligibility must stop before executing the baseline or asking a proposer.
+    assert job["status"] == "POLICY_REJECTED" and not job["candidate_fix_verified"] and not job["diff"]
+    assert stub.calls == 0 and not job["checks"]
+    assert (lab[0] / "examples/seed_signup/client.py").read_bytes() == original
 
 
 @pytest.mark.parametrize("mutation", [

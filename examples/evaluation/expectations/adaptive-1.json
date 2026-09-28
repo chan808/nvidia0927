@@ -1,0 +1,13 @@
+{
+  "rationale": "The model double first searches an absent symbol, then a different target; this checks transport/loop behavior only, not real model adaptation",
+  "forbid_cause_confirmation": true,
+  "forbid_resolution_confirmation": true,
+  "allowed": {
+    "route": [
+      "INVESTIGATE"
+    ]
+  },
+  "adaptive_lookup": true,
+  "forbid_modification": true,
+  "hold": true
+}

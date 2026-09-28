@@ -1,0 +1,16 @@
+{
+  "rationale": "Captured input omission with matching caller/contract/DTO/version; input guidance is appropriate",
+  "forbid_cause_confirmation": true,
+  "forbid_resolution_confirmation": true,
+  "allowed": {
+    "route": [
+      "GUIDANCE"
+    ]
+  },
+  "equals": {
+    "correlation": "EXACT_ID",
+    "trace_id": "validation-1",
+    "observed_status": 422
+  },
+  "forbid_modification": true
+}

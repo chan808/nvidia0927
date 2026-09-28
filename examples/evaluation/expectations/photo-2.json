@@ -1,0 +1,16 @@
+{
+  "rationale": "Recorded synthetic OCR ID connects to actual 422; photo 500 remains a report clue",
+  "forbid_cause_confirmation": true,
+  "forbid_resolution_confirmation": true,
+  "allowed": {
+    "route": [
+      "WORK_CANDIDATE"
+    ]
+  },
+  "equals": {
+    "correlation": "EXACT_ID",
+    "trace_id": "photo-2",
+    "claim_status": "CONTRADICTED",
+    "observed_status": 422
+  }
+}

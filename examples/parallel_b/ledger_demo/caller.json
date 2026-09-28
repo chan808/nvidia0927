@@ -1,0 +1,18 @@
+{
+  "code_version": "ledger-r1",
+  "operations": {
+    "POST /accounts": {
+      "source": "src/client.py#build_payload",
+      "source_sha256": "a9b6fa24f989a4496ab178649e911b9cc5636f77f62f729d2fe9195d47887971",
+      "field_mapping": {
+        "account_id": "accountId",
+        "name": "name"
+      },
+      "required_inputs": {
+        "accountId": "accountId",
+        "name": "name"
+      },
+      "source_hash_format": "lf"
+    }
+  }
+}

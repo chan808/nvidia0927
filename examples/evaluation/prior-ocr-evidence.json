@@ -1,0 +1,15 @@
+{
+  "artifact_status": "REUSED_PRIOR_LIVE_RECORD",
+  "new_call": false,
+  "source_ref": "output/validation/nemo_ocr.json",
+  "source_sha256": "ce03b4ad09ce9956d4015999387dd9f069f961f4aca37e4eb07b325ce5048f13",
+  "case_kind": "synthetic_image",
+  "limits": "Past hosted OCR record; not Skill API/education proof or a new call; request_id was not returned",
+  "service": "NeMo Retriever OCR NIM",
+  "model": "nvidia/nemotron-ocr-v2",
+  "endpoint": "https://ai.api.nvidia.com/v1/cv/nvidia/nemotron-ocr-v2",
+  "status": "success",
+  "request_id": null,
+  "image_sha256": "62abb47b7b91226d458bfe0d3f5b79b36f55fa02f3b5b54b6956faecb34750c2",
+  "elapsed_ms": 1625
+}

@@ -1,0 +1,15 @@
+{
+  "rationale": "Same caller defect structure with account_id/accountId; no field-name-specific product branch",
+  "forbid_cause_confirmation": true,
+  "forbid_resolution_confirmation": true,
+  "allowed": {
+    "route": [
+      "WORK_CANDIDATE"
+    ]
+  },
+  "equals": {
+    "correlation": "EXACT_ID",
+    "trace_id": "contract-2",
+    "observed_status": 422
+  }
+}

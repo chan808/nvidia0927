@@ -1,8 +1,5 @@
-openai>=1.50,<3
-python-dotenv>=1.0,<2
-streamlit>=1.40,<2
-pytest>=8,<10
-nvidia-nat[langchain]>=1.8,<1.9
-reportlab>=4,<5
-httpx>=0.27,<1
-Pillow>=12,<13
+# DRAFT supported environment: Windows amd64 / CPython 3.12.7.
+# Fresh-environment install/replay is a main integration gate; .venv is unchanged.
+-r requirements-windows-py312.lock
+-r requirements-test-windows-py312.lock
+-r requirements-build-windows-py312.lock

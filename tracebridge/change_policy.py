@@ -11,6 +11,8 @@ from types import MappingProxyType
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .report_contract import action_preference
+
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 # Changing a policy needs an owner code/config change, including this digest.
@@ -19,6 +21,7 @@ REGISTRATIONS = MappingProxyType({
 })
 COMMANDS = MappingProxyType({"signup-contract": "contract", "signup-regression": "regression"})
 CASE_KIND = "SEEDED_DEVELOPMENT"
+SUPPORTED_WORK_ROLE = "Frontend/Caller Repair"
 LIMITATIONS = [
     "Trusted registered seed target only; not an arbitrary-project code sandbox.",
     "Separate file copy, isolated Python flags, allowlisted environment and bounded subprocess waits.",
@@ -139,13 +142,17 @@ def read_source(policy: ChangePolicy, workspace: Path) -> dict[str, bytes]:
 
 def authorize_source(source: dict, policy: ChangePolicy) -> None:
     scope, aggregate = source.get("scope", {}), source.get("log_scope", {}).get("aggregate", {})
+    session = source.get("session", {})
+    preference = source.get("requested_action") or session.get("action_preference") or action_preference("\n".join([
+        session.get("text", ""), *session.get("answers", [])]))
     if (source.get("project_id") != policy.project_id or source.get("case_kind") != policy.case_kind
             or source.get("route") != "WORK_CANDIDATE" or source.get("run_status") != "COMPLETED"
             or source.get("correlation") != "EXACT_ID" or source.get("finding_status") != "CONFIRMED_MISMATCH"
             or source.get("diagnosis_type") != "contract_mismatch" or source.get("observed_status") not in (400, 422)
             or any(scope.get(key) != value for key, value in policy.environment.items())
             or scope.get("version") != policy.baseline_version or source.get("change")
-            or aggregate.get("conflicts") or aggregate.get("conflicting_trace_ids") or aggregate.get("complete") is False
+            or source.get("work_role") != SUPPORTED_WORK_ROLE or preference == "INVESTIGATE_ONLY"
+            or aggregate.get("conflicts") or aggregate.get("conflicting_trace_ids") or aggregate.get("complete") is not True
             or not source.get("observations") or not all(item.get("correlated") for item in source["observations"])
             or source.get("development_target", {}).get("snapshot_sha256") != policy.snapshot_sha256):
         raise PolicyDenied("Source incident is not an eligible observed seed work candidate")

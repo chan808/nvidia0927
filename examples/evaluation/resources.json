@@ -1,0 +1,66 @@
+{
+  "code_root": "project",
+  "current_artifacts": [
+    "project/client.py",
+    "project/frontend/src/client.py",
+    "project/openapi.json",
+    "assets/signup-error.png"
+  ],
+  "access": "same code, current events/logs, contract/DTO/caller version snapshots and recorded OCR per case",
+  "allowed_edits": "candidate copy of client.py only; original/inputs/contracts/tests/expectations immutable",
+  "allowed_commands": [
+    {
+      "id": "registration_repro",
+      "argv": [
+        "python",
+        "-I",
+        "-B",
+        "project/checks.py",
+        "--check",
+        "registration"
+      ]
+    },
+    {
+      "id": "user_repro",
+      "argv": [
+        "python",
+        "-I",
+        "-B",
+        "project/checks.py",
+        "--check",
+        "user"
+      ]
+    },
+    {
+      "id": "account_repro",
+      "argv": [
+        "python",
+        "-I",
+        "-B",
+        "project/checks.py",
+        "--check",
+        "account"
+      ]
+    },
+    {
+      "id": "regression",
+      "argv": [
+        "python",
+        "-I",
+        "-B",
+        "project/checks.py",
+        "--check",
+        "regression"
+      ]
+    }
+  ],
+  "budget": {
+    "investigation_seconds": 30,
+    "model_calls": 4,
+    "tool_calls": 6,
+    "check_timeout_seconds": 10
+  },
+  "scope_rule": "answer-only model latency must not be compared with measured prepare-change/human handling time",
+  "memory_rule": "fixed reviewed initial cards; only tracebridge_memory_on receives cards; new result must not feed subsequent runs",
+  "privacy": "synthetic inputs only; no external calls from this runner"
+}

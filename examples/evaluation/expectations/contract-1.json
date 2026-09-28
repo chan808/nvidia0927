@@ -1,0 +1,16 @@
+{
+  "rationale": "Current scoped caller/DTO/contract show user_id vs userId; reported 500 is wrong but signup failure remains",
+  "forbid_cause_confirmation": true,
+  "forbid_resolution_confirmation": true,
+  "allowed": {
+    "route": [
+      "WORK_CANDIDATE"
+    ]
+  },
+  "equals": {
+    "correlation": "EXACT_ID",
+    "trace_id": "contract-1",
+    "claim_status": "CONTRADICTED",
+    "observed_status": 422
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "rationale": "Two current candidates with no ID; ask for distinguishing action rather than choosing an event",
+  "forbid_cause_confirmation": true,
+  "forbid_resolution_confirmation": true,
+  "allowed": {
+    "route": [
+      "REQUEST_CONTEXT"
+    ]
+  },
+  "equals": {
+    "trace_id": null
+  },
+  "requires_questions": true,
+  "hold": true,
+  "forbid_modification": true
+}

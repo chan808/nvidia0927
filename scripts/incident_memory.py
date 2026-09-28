@@ -8,7 +8,7 @@ import sys
 
 from dotenv import load_dotenv
 
-from tracebridge.incident_memory import IncidentStore
+from tracebridge.incident_memory import IncidentStore, search_memory
 
 
 def main() -> None:
@@ -29,14 +29,24 @@ def main() -> None:
     review.add_argument("--symptom")
     review.add_argument("--finding")
     review.add_argument("--next-action")
+    review.add_argument("--changes-file", type=Path, help="JSON object of wording, applicability, steps and disproof edits; factual flags cannot be edited")
     search = commands.add_parser("search", help="Exact fields first, then lexical FTS5; at most two reviewed cards")
     search.add_argument("--query", default="")
+    search.add_argument("--disable-memory", action="store_true", help="Return DISABLED without opening the DB; saving remains available")
     for name in ("error-code", "path", "exception", "stack-fingerprint"):
         search.add_argument("--" + name, action="append", default=[])
     save = commands.add_parser("save", help="Retry saving an existing JSON result; no investigation or model call")
     save.add_argument("--file", type=Path, required=True)
     args = parser.parse_args()
     try:
+        if args.command == "search":
+            signals = {"error_codes": args.error_code, "paths": args.path, "exceptions": args.exception, "stack_fingerprints": args.stack_fingerprint}
+            result = search_memory(args.project, args.query, signals=signals if any(signals.values()) else None,
+                db_path=args.db, enabled=not args.disable_memory)
+            if result["status"] == "FAILED":
+                parser.error("Memory search failed: " + result["error_type"])
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return
         with IncidentStore(args.db) as store:
             if args.command == "list":
                 result = store.list_incidents(args.project)
@@ -48,10 +58,14 @@ def main() -> None:
                 result = store.get_card(args.project, args.card_id)
             elif args.command == "review":
                 changes = {key: getattr(args, key) for key in ("symptom", "finding", "next_action") if getattr(args, key) is not None}
+                if args.changes_file is not None:
+                    if args.changes_file.stat().st_size > 20_000:
+                        raise ValueError("Review changes JSON exceeds 20 KB")
+                    extended = json.loads(args.changes_file.read_text(encoding="utf-8-sig"))
+                    if not isinstance(extended, dict) or set(extended) & set(changes):
+                        raise ValueError("Review changes need an object without duplicate CLI fields")
+                    changes.update(extended)
                 result = store.review_card(args.project, args.card_id, args.action, reviewer=args.reviewer, changes=changes, note=args.note)
-            elif args.command == "search":
-                signals = {"error_codes": args.error_code, "paths": args.path, "exceptions": args.exception, "stack_fingerprints": args.stack_fingerprint}
-                result = store.search(args.project, args.query, signals=signals if any(signals.values()) else None)
             else:
                 if args.file.stat().st_size > 1_000_000:
                     raise ValueError("Saved result JSON exceeds 1 MB")

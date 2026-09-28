@@ -192,8 +192,10 @@ def test_timeout_and_partial_failure_preserve_observed_server_error(monkeypatch,
     event = json.loads((ROOT / "examples" / "backend_incident.json").read_text(encoding="utf-8"))
     event["trace"]["occurred_at"] = "2026-09-28T10:20:00+09:00"
     partial = investigate_submission("500 requestId=orders-staging-001", repo=REPO, catalog=LocalEventCatalog({"project_id": "agolive", "events": [event]}), log_file=tmp_path / "not-there.log")
-    assert partial["route"] == "INVESTIGATE" and partial["run_status"] == "PARTIAL_FAILURE"
-    assert partial["observed_status"] == 500 and partial["observations"]
+    assert partial["route"] == "REQUEST_CONTEXT" and partial["run_status"] == "PARTIAL_FAILURE"
+    assert partial["observed_status"] is None and partial["observations"]
+    assert not partial["log_scope"]["aggregate"]["complete"]
+    assert any("500" in item["content"] for item in partial["observations"])
 
 
 def test_budget_exhaustion_is_distinct_from_routing_and_keeps_observations(monkeypatch):

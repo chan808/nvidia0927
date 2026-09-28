@@ -1,6 +1,7 @@
 """Registered development observations and bounded source reads for the local service."""
 
 from copy import deepcopy
+import ast
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -14,6 +15,62 @@ from .report_intake import LocalEventCatalog
 
 POLICY_ID = "seed-signup-a2-v1"
 OBSERVATIONS = "output/seed-observations"
+
+
+class SeedEvidenceSource:
+    """The registered seed's checked code/input/version attribution for B's API."""
+
+    def __init__(self, source, policy, files, workspace):
+        self.source, self.policy, self.files, self.workspace = source, policy, files, workspace
+        function = next(node for node in ast.parse(files["client.py"]).body
+                        if isinstance(node, ast.FunctionDef) and node.name == policy.editable_function)
+        returned = next(node.value for node in ast.walk(function) if isinstance(node, ast.Return))
+        if not isinstance(returned, ast.Dict) or any(not isinstance(key, ast.Constant) or not isinstance(key.value, str)
+                                                   or not isinstance(value, ast.Name) for key, value in zip(returned.keys, returned.values)):
+            raise PolicyDenied("Registered seed caller mapping is unsupported")
+        self.mapping = {key.value: value.id for key, value in zip(returned.keys, returned.values)}
+        self.inputs = json.loads(files["cases.json"])["happy"]
+
+    def get_trace(self, trace_id):
+        trace = deepcopy(self.source.get_trace(trace_id))
+        trace.setdefault("project_id", self.policy.project_id)
+        trace.setdefault("code_version", self.policy.baseline_version)
+        # Both snapshot and captured check use the registered happy input. Values
+        # are omitted; the captured check/input hash is checked by seed_catalog.
+        names = set(trace.get("request", {}))
+        trace["request_types"] = {name: "string" for name, input_name in self.mapping.items()
+                                  if name in names and isinstance(self.inputs.get(input_name), str)}
+        return trace
+
+    def get_contract(self, trace_id):
+        result = deepcopy(self.source.get_contract(trace_id))
+        trace = self.get_trace(trace_id)
+        result.update(
+            provenance={"kind": "registered_seed_contract", "source": self.policy.source_root + "/api.py",
+                        "sha256": self.policy.files["api.py"], "code_version": self.policy.baseline_version},
+            versions={key: self.policy.baseline_version for key in ("contract", "dto", "caller", "code")},
+            caller={"source": self.policy.source_root + "/client.py#" + self.policy.editable_function,
+                    "source_kind": "caller_code", "source_verified": True, "source_sha256": self.policy.files["client.py"],
+                    "version": self.policy.baseline_version, "method": trace.get("method"), "path": trace.get("path"),
+                    "project_id": self.policy.project_id, "service": trace.get("service"), "environment": trace.get("environment"),
+                    "field_mapping": self.mapping, "required_inputs": {"userId": "user_id"},
+                    "input_fields": list(self.inputs), "input_types": {name: "string" for name, value in self.inputs.items() if isinstance(value, str)}},
+        )
+        result["versions"]["runtime"] = trace.get("version")
+        return result
+
+    def get_backend_evidence(self, trace_id):
+        return self.source.get_backend_evidence(trace_id)
+
+    def get_migration_state(self, trace_id):
+        return self.source.get_migration_state(trace_id)
+
+
+def bind_seed_catalog(catalog, policy, files, workspace):
+    """Attach only this owner-registered seed's provenance; no generic shortcut."""
+    catalog.events = {trace_id: (SeedEvidenceSource(source, policy, files, workspace), when)
+                      for trace_id, (source, when) in catalog.events.items()}
+    return catalog
 
 
 def registered_seed(workspace: Path | None = None):
@@ -60,7 +117,7 @@ def seed_catalog(workspace: Path | None = None) -> LocalEventCatalog:
     catalog = LocalEventCatalog(data)
     catalog.locator = "registered-seed:" + policy.policy_id
     catalog.source_kind = "executed_seed_observation" if events else "registered_seed_snapshot"
-    return catalog
+    return bind_seed_catalog(catalog, policy, files, workspace)
 
 
 def seed_code(terms: list[str], *, workspace: Path | None = None) -> list[Evidence]:

@@ -1,0 +1,108 @@
+{
+  "source_kind": "synthetic_reviewed_fixture",
+  "description": "Controlled reviewed investigation clues, no real human review-time/cause/fix claim",
+  "runs": [
+    {
+      "result": {
+        "contract_version": 1,
+        "project_id": "tracebridge-evaluation",
+        "incident_id": "fixture-history-rooms",
+        "run_id": "fixture-history-run-rooms",
+        "revision": 1,
+        "message_received_at": null,
+        "relative_date_basis": {},
+        "correlation": "EXACT_ID",
+        "correlation_basis": null,
+        "trace_id": "old-rooms",
+        "candidate_trace_ids": [],
+        "candidates": [],
+        "route": "INVESTIGATE",
+        "route_reason": "제보와 실제 요청의 연결을 더 확인해야 합니다",
+        "work_role": null,
+        "diagnosis_type": "backend_exception_unconfirmed",
+        "finding_status": "INCONCLUSIVE",
+        "claim_status": "UNVERIFIABLE",
+        "claim_items": [],
+        "claim_coverage": "explicit_facts_only",
+        "summary": "합성 과거 RoomFullException 단서; 원인과 수정 미검증",
+        "next_action": "화면·동작·대략적인 시각을 보완해 주세요.",
+        "observations": [
+          {
+            "id": "L1",
+            "kind": "log",
+            "source": "synthetic_history",
+            "content": "RoomFullException: controlled historical clue",
+            "correlated": true,
+            "scope_status": "VERIFIED",
+            "trace_id": "old-rooms"
+          }
+        ],
+        "report_clues": [],
+        "evidence": [
+          {
+            "id": "L1",
+            "kind": "log",
+            "source": "synthetic_history",
+            "content": "RoomFullException: controlled historical clue",
+            "correlated": true,
+            "scope_status": "VERIFIED",
+            "trace_id": "old-rooms"
+          }
+        ],
+        "hypotheses": [],
+        "questions": [
+          "어떤 화면에서 무엇을 하려던 중이었나요?",
+          "대략 언제였고, 화면에 어떤 오류 문구가 나왔나요?"
+        ],
+        "missing_information": [],
+        "next_steps": [
+          "현재 로그 예외와 실행 버전을 먼저 대조한다"
+        ],
+        "version_provenance": {
+          "local_head": {
+            "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "source": "synthetic_snapshot"
+          },
+          "runtime": {
+            "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "status": "OBSERVED",
+            "source": "synthetic_snapshot"
+          },
+          "comparison": "MATCH"
+        },
+        "deployment_observed": false,
+        "log_scope": {
+          "aggregate": {
+            "complete": true,
+            "conflicts": []
+          }
+        },
+        "run_status": "COMPLETED",
+        "stop_reason": "synthetic_reviewed_clue",
+        "cause_confirmed": false,
+        "fix_applied": false,
+        "fix_verified": false,
+        "steps": [],
+        "service_calls": [],
+        "model_calls": 0,
+        "usage": {
+          "prompt_tokens": 0,
+          "completion_tokens": 0
+        },
+        "model_trace": [],
+        "notes": [],
+        "executed_at": "2026-09-19T12:00:00+00:00",
+        "symptom_summary": "방 입장 HTTP 500",
+        "scope": {
+          "service": "evaluation-api",
+          "environment": "dev",
+          "method": "POST",
+          "path": "/rooms/enter",
+          "operation": "room_enter",
+          "occurred_at": "2026-09-19T12:00:00+00:00"
+        },
+        "observed_status": 500
+      }
+    }
+  ]
+}

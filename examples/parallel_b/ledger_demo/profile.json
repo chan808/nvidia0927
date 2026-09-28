@@ -1,0 +1,13 @@
+{
+  "project_id": "ledger-demo",
+  "service": "ledger-api",
+  "environment": "test",
+  "root": ".",
+  "code_roots": ["src"],
+  "log_sources": [{"id": "requests", "path": "events.jsonl", "format": "jsonl"}],
+  "openapi_path": "openapi.json",
+  "dto_path": "dto.json",
+  "caller_evidence_path": "caller.json",
+  "version_observation": {"method": "json_file", "path": "version.json"},
+  "policy_refs": []
+}

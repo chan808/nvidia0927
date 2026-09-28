@@ -1,0 +1,16 @@
+{
+  "rationale": "Same route/status as reviewed historical RoomFullException, now TimeoutException; no historical remedy becomes current cause",
+  "forbid_cause_confirmation": true,
+  "forbid_resolution_confirmation": true,
+  "allowed": {
+    "route": [
+      "INVESTIGATE"
+    ]
+  },
+  "equals": {
+    "correlation": "EXACT_ID",
+    "trace_id": "memory-1"
+  },
+  "forbid_modification": true,
+  "hold": true
+}

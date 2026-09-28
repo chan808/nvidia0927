@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sqlite3
 import sys
@@ -11,9 +12,10 @@ from dotenv import load_dotenv
 from tracebridge.report_agent import confirm_candidate, investigate_submission
 from tracebridge.report_service import follow_up_service as follow_up_submission, prepare_submission
 from tracebridge.seed_project import capture_seed_action
-from tracebridge.report_contract import ReportContext
+from tracebridge.report_contract import ReportContext, presentation_status
 from tracebridge.report_intake import LocalEventCatalog
-from tracebridge.incident_memory import IncidentStore
+from tracebridge.incident_memory import IncidentStore, export_manual
+from tracebridge.project_profile import load_project_profile
 
 
 def main() -> None:
@@ -23,6 +25,7 @@ def main() -> None:
     parser.add_argument("--report", default="", help="Rough symptom or natural-language instruction; optional with --image")
     parser.add_argument("--image", type=Path, help="PNG or JPEG screenshot; optional with --report")
     parser.add_argument("--repo", type=Path, help="Agolive checkout; defaults to TRACEBRIDGE_AGOLIVE_REPO")
+    parser.add_argument("--profile", type=Path, help="Registered local project JSON profile; no execution authority")
     parser.add_argument("--logs-file", type=Path, help="Registered local log source, read only if selected by the agent")
     parser.add_argument("--events", type=Path, help="Explicit bounded event catalog; uses the same checked triage as the UI")
     parser.add_argument("--answer", action="append", default=[], help="Same-incident follow-up answer; may be repeated in this process")
@@ -38,6 +41,9 @@ def main() -> None:
     parser.add_argument("--max-seconds", type=float, default=90, help="Bounded investigation time (1..180 seconds)")
     parser.add_argument("--docker-logs", action="store_true", help="Allow selected local Docker log collection")
     parser.add_argument("--live", action="store_true", help="Send the image and selected redacted text/code/logs to NVIDIA services")
+    parser.add_argument("--no-memory", action="store_true", help="Disable historical search/card delivery; current incident storage remains enabled")
+    parser.add_argument("--metrics-dir", type=Path, help="Record actual tool/model completion metadata using the optional observation adapter")
+    parser.add_argument("--manual-output", type=Path, help="Export reviewed cards for this project as a Markdown manual")
     parser.add_argument("--registered-seed", action="store_true", help="Use the registered local seed project instead of Agolive")
     parser.add_argument("--capture-seed-action", action="store_true", help="Execute the fixed seed signup check and capture its current observation")
     parser.add_argument("--confirm-candidate", help="Explicitly select one candidate offered by the current stored run")
@@ -51,11 +57,14 @@ def main() -> None:
                 parser.error("Image exceeds 8 MB limit")
             image = args.image.read_bytes()
         catalog = LocalEventCatalog.from_file(args.events) if args.events else None
+        profile_path = args.profile or (os.getenv("TRACEBRIDGE_PROJECT_PROFILE") if not args.registered_seed else None)
+        profile = load_project_profile(profile_path) if profile_path else None
         context = ReportContext(environment=args.environment, service=args.service, occurred_at=args.occurred_at, trace_id=args.trace_id, operation=args.operation)
         options = dict(repo=args.repo, log_file=args.logs_file, catalog=catalog,
             include_docker_logs=args.docker_logs, use_nvidia=args.live,
             since_minutes=args.since_minutes, max_seconds=args.max_seconds, db_path=args.db,
-            registered_seed=args.registered_seed)
+            registered_seed=args.registered_seed, project_profile=profile, memory_enabled=not args.no_memory,
+            observer_output_dir=args.metrics_dir)
         if args.capture_seed_action:
             if not args.registered_seed:
                 parser.error("--capture-seed-action requires --registered-seed")
@@ -64,7 +73,7 @@ def main() -> None:
             if not args.answer or args.report or image:
                 parser.error("--resume requires --answer; use --report/--image for a new incident")
             with IncidentStore(args.db) as store:
-                result = store.resume_result(args.project or ("tracebridge-seed-signup" if args.registered_seed else catalog.project_id if catalog else "agolive"), args.resume)
+                result = store.resume_result(args.project or ("tracebridge-seed-signup" if args.registered_seed else profile.project_id if profile else catalog.project_id if catalog else "agolive"), args.resume)
         else:
             result = investigate_submission(args.report, image=image, context=context, **options)
         for answer in args.answer:
@@ -73,6 +82,15 @@ def main() -> None:
             result = confirm_candidate(result, args.confirm_candidate, **options)
         if args.prepare_change:
             result = {"investigation": result, "change": prepare_submission(result, db_path=args.db, live=args.live)}
+            result["presentation"] = presentation_status(result["investigation"], result["change"]["job"])
+        else:
+            result["presentation"] = presentation_status(result)
+        if args.manual_output:
+            current = result.get("investigation", result)
+            manual = export_manual(current["project_id"], db_path=args.db)
+            args.manual_output.parent.mkdir(parents=True, exist_ok=True)
+            args.manual_output.write_text(manual["markdown"], encoding="utf-8")
+            result["manual_export"] = {key: manual[key] for key in ("status", "project_id", "card_count", "card_ids")}
     except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
         parser.error(str(exc))
     serialized = json.dumps(result, ensure_ascii=False, indent=2)

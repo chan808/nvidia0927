@@ -1,0 +1,15 @@
+{
+  "rationale": "Required UI input was captured but the observed caller omits it; do not dismiss as user omission",
+  "forbid_cause_confirmation": true,
+  "forbid_resolution_confirmation": true,
+  "allowed": {
+    "route": [
+      "WORK_CANDIDATE"
+    ]
+  },
+  "equals": {
+    "correlation": "EXACT_ID",
+    "trace_id": "validation-2",
+    "observed_status": 422
+  }
+}

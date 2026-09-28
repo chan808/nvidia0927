@@ -1,0 +1,120 @@
+{
+  "contract-001": {
+    "provenance": {
+      "kind": "synthetic_fixture",
+      "source": "tracebridge/fixtures.py",
+      "code_version": "fixture-v1"
+    },
+    "versions": {
+      "runtime": "fixture-v1",
+      "contract": "fixture-v1",
+      "dto": "fixture-v1",
+      "caller": "fixture-v1"
+    },
+    "caller": {
+      "source": "tracebridge/demo_app.py#frontend_signup_payload",
+      "source_kind": "caller_code",
+      "source_sha256": "ed35c6ef38230798cfbaba7375edc15d0ad6d536e7b214a256bab4b8fcfc3a22",
+      "version": "fixture-v1",
+      "method": "POST",
+      "path": "/api/users",
+      "field_mapping": {
+        "user_id": "user_id",
+        "name": "name"
+      },
+      "required_inputs": {
+        "userId": "user_id",
+        "name": "name"
+      },
+      "input_fields": [
+        "user_id",
+        "name"
+      ],
+      "input_types": {
+        "user_id": "string",
+        "name": "string"
+      },
+      "input_source": "synthetic controlled fixture input",
+      "source_hash_format": "lf"
+    }
+  },
+  "migration-002": {
+    "provenance": {
+      "kind": "synthetic_fixture",
+      "source": "tracebridge/fixtures.py",
+      "code_version": "fixture-v1"
+    },
+    "versions": {
+      "runtime": "fixture-v1",
+      "contract": "fixture-v1",
+      "dto": "fixture-v1",
+      "caller": "fixture-v1"
+    },
+    "caller": {
+      "source": "examples/parallel_b/fixture-caller.py#serialize_manual_input",
+      "source_kind": "caller_code",
+      "source_sha256": "032ee5c95e4b48390fc7768d7e59861690bc8bc95335161a2d57f8d949fdf958",
+      "version": "fixture-v1",
+      "method": "POST",
+      "path": "/api/users",
+      "field_mapping": {
+        "userId": "userId",
+        "name": "name",
+        "phone": "phone"
+      },
+      "required_inputs": {
+        "userId": "userId",
+        "name": "name"
+      },
+      "input_fields": [
+        "userId",
+        "name",
+        "phone"
+      ],
+      "input_types": {
+        "userId": "string",
+        "name": "string",
+        "phone": "string"
+      },
+      "input_source": "synthetic controlled fixture input",
+      "source_hash_format": "lf"
+    }
+  },
+  "claim-003": {
+    "provenance": {
+      "kind": "synthetic_fixture",
+      "source": "tracebridge/fixtures.py",
+      "code_version": "fixture-v1"
+    },
+    "versions": {
+      "runtime": "fixture-v1",
+      "contract": "fixture-v1",
+      "dto": "fixture-v1",
+      "caller": "fixture-v1"
+    },
+    "caller": {
+      "source": "examples/parallel_b/fixture-caller.py#serialize_manual_input",
+      "source_kind": "caller_code",
+      "source_sha256": "032ee5c95e4b48390fc7768d7e59861690bc8bc95335161a2d57f8d949fdf958",
+      "version": "fixture-v1",
+      "method": "POST",
+      "path": "/api/users",
+      "field_mapping": {
+        "userId": "userId",
+        "name": "name"
+      },
+      "required_inputs": {
+        "userId": "userId",
+        "name": "name"
+      },
+      "input_fields": [
+        "userId"
+      ],
+      "input_types": {
+        "userId": "string"
+      },
+      "input_source": "synthetic controlled fixture input",
+      "source_hash_format": "lf"
+    }
+  }
+}

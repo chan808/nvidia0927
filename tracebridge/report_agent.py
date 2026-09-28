@@ -23,10 +23,12 @@ from .deadline import DeadlineExceeded, check_deadline, remaining_timeout
 from .incident_memory import IncidentStore, current_signals, persist_result, recheck_memory, search_memory, signals_from_text
 from .project_gpt import ProposedReport
 from .project_investigation import _checked_hypotheses
+from .project_profile import ProjectProfile, load_project_profile, read_project_logs, observe_project_version
+from .evidence import EvidenceError, ProjectEvidenceSource
 from .report_contract import KST, ReportContext, action_preference, empty_result, plain_questions
 from .report_intake import LocalEventCatalog, ObservedEventCatalog, selected_catalog_conflicts, triage_report
 from .project_sources import (
-    Evidence, MAX_LOG_BYTES, agolive_repo_path, canonical_service, code_evidence, collect_scoped_logs, docker_compose_logs,
+    Evidence, LogRead, LogText, MAX_LOG_BYTES, agolive_repo_path, canonical_service, code_evidence, collect_scoped_logs, docker_compose_logs, file_log_stream,
     redact, report_terms, repository_revision, source_tree_dirty,
     running_service_revision, stack_profile, validate_agolive_repo,
 )
@@ -48,16 +50,19 @@ def nvidia_settings() -> tuple[str | None, str]:
 class SearchArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
     terms: list[str] = Field(min_length=1, max_length=8)
-    services: list[Literal["backend", "realtime", "agent", "frontend", "seed-api", "seed-client"]] = Field(default_factory=list, max_length=4)
+    services: list[str] = Field(default_factory=list, max_length=4)
+    purpose: str = Field(default="", max_length=160)
 
 
 class LogArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
     terms: list[str] = Field(default_factory=list, max_length=8)
+    purpose: str = Field(default="", max_length=160)
 
 
 class EmptyArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    purpose: str = Field(default="", max_length=160)
 
 
 class ConciseHypothesis(BaseModel):
@@ -81,6 +86,7 @@ class Conclusion(ProposedReport):
 
 class FinalArguments(BaseModel):
     """Flat function arguments avoid nested schema references at hosted endpoints."""
+    model_config = ConfigDict(extra="forbid")
     intent: Literal["report", "investigate", "fix_request", "unknown"]
     symptom_summary: str = Field(max_length=200)
     cause: str = Field(default="", max_length=160)
@@ -108,13 +114,14 @@ class PhotoObservation(BaseModel):
     has_app_screen: bool
 
 
-TOOL_ARGS = {"search_code": SearchArgs, "find_logs": LogArgs, "get_version": EmptyArgs}
+TOOL_ARGS = {"search_code": SearchArgs, "find_logs": LogArgs, "get_version": EmptyArgs, "get_contract": EmptyArgs}
 TOOL_SCHEMAS = [
     {"type": "function", "function": {"name": name, "description": description, "parameters": TOOL_ARGS[name].model_json_schema()}}
     for name, description in (
         ("search_code", "Search bounded registered project source snippets with literal terms. No files can be changed."),
         ("find_logs", "Read selected recent registered local logs. Without the submitted request ID, returned logs are candidates, not the same incident."),
         ("get_version", "Distinguish local HEAD, manually configured SHA and a revision label observed on an allowed running container. No unknown/configured SHA proves running code."),
+        ("get_contract", "Read registered OpenAPI/DTO/caller evidence for the currently selected observed request. Missing contracts and versions stay unobserved. No supplied IDs, paths or execution permissions."),
     )
 ]
 def _hosted_final_schema() -> dict:
@@ -206,11 +213,39 @@ def _log_tail(path: Path, *, deadline: float | None = None) -> str:
         raw = b"".join(chunks)
     if preceding != b"\n":
         raw = raw.partition(b"\n")[2]
-    return raw.decode("utf-8", errors="replace")
+    return LogText(raw.decode("utf-8", errors="replace"), {
+        "complete": not bool(start), "byte_limit_reached": bool(start),
+        "source_bytes": size, "reasons": ["upstream_byte_limit_reached"] if start else [],
+    })
+
+
+def _has_provided_source(value: str) -> bool:
+    return bool(value) or hasattr(value, "collection_state")
+
+
+def _profile_binding(profile: ProjectProfile | None, deadline: float | None) -> dict | None:
+    if profile is None:
+        return None
+    digest = None
+    if profile.config_path:
+        check_deadline(deadline)
+        with profile.config_path.open("rb") as stream:
+            raw = stream.read(64_001)
+        if len(raw) > 64_000:
+            raise ValueError("프로젝트 설정 크기 한도에 도달했습니다")
+        digest = hashlib.sha256(raw).hexdigest()
+    return {
+        "config": str(profile.config_path) if profile.config_path else None, "sha256": digest,
+        "code_roots": [str(path) for path in profile.code_roots],
+        "log_sources": [{"id": item.id, "path": str(item.path), "format": item.format} for item in profile.log_sources],
+        "openapi": str(profile.openapi_path), "dto": str(profile.dto_path), "caller": str(profile.caller_evidence_path),
+        "version": {"method": profile.version_observation.method, "path": str(profile.version_observation.path), "field": profile.version_observation.field},
+        "policy_refs": list(profile.policy_refs),
+    }
 
 
 class ProjectTools:
-    def __init__(self, repo: Path, report: str, *, log_file: Path | None, provided_logs: str, include_docker: bool, since_minutes: int, context: ReportContext | None = None, project_id: str = "agolive", registered_log_scope: dict | None = None, identity_report: str | None = None, deadline: float | None = None, seed_policy=None):
+    def __init__(self, repo: Path, report: str, *, log_file: Path | None, provided_logs: str, include_docker: bool, since_minutes: int, context: ReportContext | None = None, project_id: str = "agolive", registered_log_scope: dict | None = None, identity_report: str | None = None, deadline: float | None = None, seed_policy=None, profile: ProjectProfile | None = None):
         self.repo, self.report = repo, report
         self.deadline = deadline
         self.identity_report = report if identity_report is None else identity_report
@@ -218,6 +253,10 @@ class ProjectTools:
         self.since_minutes = since_minutes
         self.project_id = project_id
         self.seed_policy = seed_policy
+        self.profile = profile
+        self.selected_source = None
+        self.selected_trace_id = None
+        self.source_loaders = {}
         self.registration = registered_log_scope if registered_log_scope is not None else {
             key: os.getenv(name) for key, name in (("service", "TRACEBRIDGE_LOG_SERVICE"), ("environment", "TRACEBRIDGE_LOG_ENVIRONMENT"), ("timezone", "TRACEBRIDGE_LOG_TIMEZONE")) if os.getenv(name)
         }
@@ -235,6 +274,14 @@ class ProjectTools:
             if seed_policy:
                 self.evidence = [Evidence("P1", "profile", "registered-seed", "통제된 개발 씨드: Python 요청 생성기와 인프로세스 API. 실행 서비스 배포 관측 아님.")]
                 self.revision, self.dirty = seed_policy.snapshot_sha256, False
+            elif profile:
+                self.evidence = [Evidence("P1", "profile", "registered-project-profile", json.dumps({
+                    "project_id": profile.project_id, "service": profile.service, "environment": profile.environment,
+                    "code_roots": [path.relative_to(profile.root).as_posix() for path in profile.code_roots],
+                    "contract_registered": profile.openapi_path is not None, "execution_authorized": False,
+                }, ensure_ascii=False))]
+                self.revision = repository_revision(repo, deadline=deadline)
+                self.dirty = source_tree_dirty(repo, deadline=deadline)
             else:
                 self.evidence = stack_profile(repo, deadline=deadline)
                 self.revision = repository_revision(repo, deadline=deadline)
@@ -248,7 +295,9 @@ class ProjectTools:
         self.version_checked = False
         self.log_inputs: list[tuple[str, str, dict]] | None = None
         self.log_scope: list[dict] = []
-        self.log_catalog = ObservedEventCatalog(project_id, [], complete=not bool(log_file or provided_logs or include_docker))
+        self.source_records: dict[str, list[dict]] = {}
+        self.source_evidence: dict[str, list[Evidence]] = {}
+        self.log_catalog = ObservedEventCatalog(project_id, [], complete=not bool(log_file or _has_provided_source(provided_logs) or include_docker or profile))
         self.catalog_conflicts: list[dict] = []
 
     def versions(self) -> dict:
@@ -266,57 +315,126 @@ class ProjectTools:
         if self.log_inputs is not None:
             return
         self.log_inputs = []
-        records = []
-        sources = (["registered-log"] if self.log_file else []) + (["provided-log"] if self.provided_logs else []) + (["local-docker"] if self.include_docker else [])
+        sources = (["registered-log"] if self.log_file else []) + (["provided-log"] if _has_provided_source(self.provided_logs) else []) + (["local-docker"] if self.include_docker else [])
+        if self.profile:
+            for entry in self.profile.log_sources:
+                source = "profile:" + entry.id
+                sources.append(source)
+                self.source_loaders[source] = lambda entry=entry: self._profile_log_stream(entry)
+            if not sources:
+                self.log_scope.append({"source": "registered-project-profile", "complete": False,
+                                       "available": False, "reasons": ["no_registered_log_source"]})
         for source in sources:
             try:
                 check_deadline(self.deadline)
                 metadata = self.registration if source != "provided-log" else {"project_id": self.project_id}
                 if source == "registered-log":
-                    text = _log_tail(self.log_file, deadline=self.deadline)
+                    text = file_log_stream(self.log_file, deadline=self.deadline)
                 elif source == "provided-log":
                     text = self.provided_logs
+                elif source in self.source_loaders:
+                    text = self.source_loaders[source]()
                 else:
-                    text, error = docker_compose_logs(self.repo, since_minutes=self.since_minutes, deadline=self.deadline)
+                    text, error = docker_compose_logs(self.repo, since_minutes=self.since_minutes, deadline=self.deadline, scope=self.context, streaming=True)
                     if error:
                         self.notes.append(error)
                         self.failures.append("docker_logs_unavailable")
-                        self.log_scope.append({"source": source, "available": False})
+                        self.log_scope.append({"source": source, "available": False, "complete": False, "reasons": ["source_unavailable"]})
                         continue
                 self.log_inputs.append((source, text, metadata))
-                selected, notes, events, scope = collect_scoped_logs(text, self.identity_report, source=source, scope=self.context, source_metadata=metadata, search_terms=report_terms(self.report), deadline=self.deadline)
-                records.extend({**event, "observation_source": source} for event in events)
-                self._add(selected[:10])
-                self.notes.extend(notes)
-                self.log_scope.append(scope)
-                if scope.get("deadline_exhausted"):
-                    self.timeout_reasons.append(source)
+                self._scan_logs(source, text, metadata, report_terms(self.report))
             except DeadlineExceeded as exc:
                 phase = exc.phase if exc.phase != "deadline_exhausted" else ("docker_logs" if source == "local-docker" else source)
                 self.timeout_reasons.append(phase)
-                self.log_scope.append({"source": source, "deadline_exhausted": True, "event_limit_reached": False})
+                self.log_scope.append({"source": source, "deadline_exhausted": True, "event_limit_reached": False, "complete": False, "reasons": ["deadline_exhausted"]})
                 self.notes.append("로그 소스 조회 중 시간 한도에 도달해 이전에 확보한 관측을 보존했습니다")
             except (OSError, ValueError):
                 self.notes.append("등록된 로그 소스를 읽지 못했습니다")
                 self.failures.append("registered_log_unavailable")
-                self.log_scope.append({"source": source, "available": False})
+                self.log_scope.append({"source": source, "available": False, "complete": False, "reasons": ["source_unavailable"]})
         if not self.log_inputs:
             self.notes.append("연결된 로그 소스가 없습니다")
-        complete = not any(item.get("event_limit_reached") or item.get("deadline_exhausted") or item.get("available") is False for item in self.log_scope)
-        self.log_catalog = ObservedEventCatalog(self.project_id, records, complete=complete)
+        self._refresh_log_catalog()
+
+    def _profile_log_stream(self, entry):
+        check_deadline(self.deadline)
+        if not entry.path.resolve().is_relative_to(self.profile.root.resolve()):
+            raise ValueError("등록 로그 경로가 프로젝트 범위를 벗어났습니다")
+        if entry.format == "jsonl":
+            return file_log_stream(entry.path, deadline=self.deadline, registered_format="jsonl")
+        # B's public bounded JSON reader preserves its own completeness. The
+        # adapter never turns a partial JSON source into a complete JSONL stream.
+        collected = read_project_logs(replace(self.profile, log_sources=(entry,)))
+        check_deadline(self.deadline)
+        state = {"complete": collected["complete"], "coverage": "REGISTERED_JSON",
+                 "reasons": collected.get("limitations", []), "upstream_sources": collected["sources"]}
+        return LogRead(((json.dumps(event, ensure_ascii=False) + "\n").encode() for event in collected["events"]), state)
+
+    def _scan_logs(self, source, text, metadata, terms):
+        selected, notes, events, scope = collect_scoped_logs(
+            text, self.identity_report, source=source, scope=self.context,
+            source_metadata=metadata, search_terms=terms, deadline=self.deadline)
+        previous = next((state for state in self.log_scope if state["source"] == source), None)
+        if previous:
+            # Query/excerpt changes cannot erase an earlier collection failure.
+            scope["complete"] = bool(scope["complete"] and previous.get("complete", True))
+            scope["reasons"] = list(dict.fromkeys([*previous.get("reasons", []), *scope["reasons"]]))
+            scope["observation_count"] = max(previous.get("observation_count", 0), scope["observation_count"])
+            scope["conflicts"] = [*previous.get("conflicts", []), *scope["conflicts"]]
+            if previous.get("source_mtime_ns") is not None and previous.get("source_mtime_ns") != scope.get("source_mtime_ns"):
+                scope["complete"] = False
+                scope["reasons"].append("source_changed_between_reads")
+            self.log_scope.remove(previous)
+        old = self.source_records.get(source, [])
+        by_record = {json.dumps(event, sort_keys=True, ensure_ascii=False): event for event in [*old, *events]}
+        self.source_records[source] = list(by_record.values())[:200]
+        self.source_evidence[source] = selected
+        self._add(selected)
+        self.notes.extend(notes)
+        self.log_scope.append(scope)
+        if scope.get("deadline_exhausted"):
+            self.timeout_reasons.append(source)
+        if scope.get("available") is False or scope.get("read_failed") or scope.get("process_failed"):
+            self.failures.append(source + "_unavailable")
+        return selected, notes
+
+    def _refresh_log_catalog(self):
+        records = [{**event, "observation_source": source} for source, events in self.source_records.items() for event in events]
+        self.log_catalog = ObservedEventCatalog(self.project_id, records,
+            observation_count=sum(item.get("observation_count", 0) for item in self.log_scope), source_states=self.log_scope)
+
+    def collection_scope(self) -> dict:
+        return {
+            "requested": self.context.to_dict(), "sources": self.log_scope,
+            "aggregate": self.log_catalog.completeness(additional_conflicts=self.catalog_conflicts),
+            "connected": bool(self.log_inputs), "failures": list(dict.fromkeys(self.failures)),
+            # Safe structured observations persist separately from model/display
+            # excerpts, including conflict witnesses beyond the decision cap.
+            "retained_observations": [{
+                "source": event.get("observation_source"),
+                **{key: redact(value) if isinstance(value, str) else value for key, value in event["trace"].items() if key in {
+                    "trace_id", "project_id", "service", "environment", "occurred_at", "method", "path", "operation", "version", "code_version", "response_status",
+                }},
+                "request_fields": list(event["trace"].get("request", {})),
+            } for event in self.log_catalog.observations],
+        }
 
     def _add(self, items: list[Evidence]) -> list[dict]:
         result = []
         for item in items:
             found = next((old for old in self.evidence if (old.kind, old.source, old.content) == (item.kind, item.source, item.content)
-                          or item.kind == old.kind == "code" and old.content == item.content and old.source.rsplit(":", 1)[0] == item.source.rsplit(":", 1)[0]), None)
+                          or item.kind == old.kind == "code" and old.content == item.content and old.source.rsplit(":", 1)[0] == item.source.rsplit(":", 1)[0]
+                          or item.kind == old.kind == "log" and old.content == item.content
+                          and old.source.rsplit(":", 1)[0] == item.source.rsplit(":", 1)[0]
+                          and (old.trace_id, old.event_at, old.service, old.environment, old.response_status, old.scope_status)
+                          == (item.trace_id, item.event_at, item.service, item.environment, item.response_status, item.scope_status)), None)
             if found:
                 result.append(found.to_dict())
                 continue
             count = sum(old.kind == item.kind for old in self.evidence)
-            if item.kind == "code" and count >= 6 or item.kind == "log" and count >= 20:
+            if item.kind == "code" and count >= 6 or item.kind == "log" and count >= 20 or item.kind == "contract" and count >= 3:
                 continue
-            prefix = {"code": "C", "log": "L", "version": "V"}[item.kind]
+            prefix = {"code": "C", "log": "L", "version": "V", "contract": "K"}[item.kind]
             current = replace(item, id=f"{prefix}{count + 1}", source_revision=self.revision if item.kind == "code" else item.source_revision)
             self.evidence.append(current)
             result.append(current.to_dict())
@@ -329,7 +447,14 @@ class ProjectTools:
         parsed = TOOL_ARGS[name].model_validate_json(arguments)
         if name == "get_version":
             if not self.version_checked:
-                if self.include_docker:
+                if self.profile:
+                    observed = observe_project_version(self.profile)
+                    check_deadline(self.deadline)
+                    self.runtime_revision = {"sha": observed.get("runtime_version"), "status": observed["status"],
+                        "source": observed.get("source"), "observation": observed, "service": self.profile.service,
+                        "environment": self.profile.environment, "source_kind": "REGISTERED_LOCAL_VERSION_SNAPSHOT",
+                        "deployment_observed": False}
+                elif self.include_docker:
                     self.runtime_revision = running_service_revision(self.repo, service=self.context.service, environment=self.context.environment, deadline=self.deadline)
                     if self.runtime_revision["status"] != "OBSERVED":
                         self.failures.append("runtime_version_unavailable")
@@ -338,14 +463,33 @@ class ProjectTools:
                 "V1", "version", "local-checkout / configured-deployment / runtime",
                 json.dumps(self.versions(), ensure_ascii=False),
             )]), "version_provenance": self.versions(), "notes": []}
+        if name == "get_contract":
+            if not self.selected_source or not self.selected_trace_id:
+                return {"status": "UNOBSERVED", "evidence": [], "notes": ["현재 요청 연결이 없어 계약 조회를 확정하지 못했습니다"]}
+            source = ProjectEvidenceSource(self.profile, event_source=self.selected_source) if self.profile else self.selected_source
+            try:
+                contract = source.get_contract(self.selected_trace_id)
+            except EvidenceError:
+                return {"status": "UNOBSERVED", "evidence": [], "notes": ["이번 요청의 등록 계약 자료가 없습니다"]}
+            check_deadline(self.deadline)
+            excerpt = redact(json.dumps(contract, ensure_ascii=False), mask_identity=False)[:2400]
+            return {"status": contract.get("status", "OBSERVED_SNAPSHOT"), "evidence": self._add([
+                Evidence("K1", "contract", "registered-contract", excerpt, trace_id=self.selected_trace_id,
+                         scope_status="OBSERVED_SNAPSHOT")]), "notes": contract.get("limitations", [])[:4]}
         terms = [term.strip() for term in parsed.terms if 2 <= len(term.strip()) <= 80]
         if name == "search_code":
             if self.seed_policy:
                 from .seed_project import seed_code
                 items = seed_code(terms)
             else:
-                items = code_evidence(self.repo, terms, parsed.services, deadline=self.deadline)[:3]
+                if any(not isinstance(service, str) or not 1 <= len(service) <= 80 for service in parsed.services):
+                    raise ValueError("조회 서비스 이름을 확인해 주세요")
+                items = code_evidence(self.repo, terms, parsed.services, deadline=self.deadline,
+                                      **({"code_roots": self.profile.code_roots} if self.profile else {}))[:3]
+                if self.profile:
+                    items = [replace(item, service=self.profile.service) for item in items]
             return {"evidence": self._add(items), "notes": []}
+        already_loaded = self.log_inputs is not None
         self._load_logs()
         evidence, notes = [], []
         # Query terms change selection; the submitted ID remains the only exact correlation key.
@@ -355,18 +499,21 @@ class ProjectTools:
             except DeadlineExceeded:
                 self.timeout_reasons.append(source)
                 break
-            selected, current_notes, _, scope = collect_scoped_logs(text, self.identity_report, source=source, scope=self.context, source_metadata=metadata, search_terms=[*report_terms(self.report), *terms], deadline=self.deadline)
-            evidence.extend(selected[:10])
+            if already_loaded and source != "local-docker":
+                current = self.source_loaders[source]() if source in self.source_loaders else file_log_stream(self.log_file, deadline=self.deadline) if source == "registered-log" else text
+                selected, current_notes = self._scan_logs(source, current, metadata, [*report_terms(self.report), *terms])
+            else:
+                selected, current_notes = self.source_evidence.get(source, []), []
+            evidence.extend(selected)
             notes.extend(current_notes)
-            if scope.get("deadline_exhausted"):
-                self.timeout_reasons.append(source)
+        self._refresh_log_catalog()
         if not self.log_inputs:
             notes.append("연결된 로그 소스가 없습니다")
         self.notes.extend(notes)
         output_evidence = self._add(evidence)
         if self.timeout_reasons:
             output_evidence = [item.to_dict() for item in self.evidence if item.kind == "log"]
-        return {"evidence": output_evidence, "notes": list(dict.fromkeys(notes))[:4], "log_scope": self.log_scope, "timed_out": bool(self.timeout_reasons)}
+        return {"evidence": output_evidence, "notes": list(dict.fromkeys(notes))[:4], "log_scope": self.collection_scope(), "timed_out": bool(self.timeout_reasons)}
 
 
 def _hypothesis_evidence(tools: ProjectTools, result: dict) -> list[Evidence]:
@@ -394,7 +541,7 @@ def _checked_current_hypotheses(proposal: Conclusion | None, tools: ProjectTools
             item[key] = redact(item[key][:1000])
         # OCR, visual interpretation and version declarations are never server cause evidence.
         for key in ("supporting_evidence_ids", "contradicting_evidence_ids"):
-            item[key] = [id_ for id_ in item[key] if by_id[id_].kind in {"code", "log", "rule_observation"}]
+            item[key] = [id_ for id_ in item[key] if by_id[id_].kind in {"code", "log", "rule_observation", "contract"}]
         if not item["supporting_evidence_ids"]:
             item["status"] = "UNVERIFIED"
             continue
@@ -414,6 +561,8 @@ def _checked_current_hypotheses(proposal: Conclusion | None, tools: ProjectTools
             item["status"] = "LOG_CANDIDATE"
         elif any(e.kind == "rule_observation" for e in support):
             item["status"] = "OBSERVATION_CANDIDATE"
+        elif any(e.kind == "contract" for e in support):
+            item["status"] = "CONTRACT_CANDIDATE"
         else:
             item["status"] = "CODE_ONLY"
         if item["contradicting_evidence_ids"]:
@@ -461,6 +610,10 @@ def investigate_submission(
     max_seconds: float = 90.0,
     db_path: str | Path | None = None,
     registered_seed: bool = False,
+    project_profile: ProjectProfile | str | Path | None = None,
+    memory_enabled: bool = True,
+    observer=None,
+    observer_output_dir: str | Path | None = None,
 ) -> dict:
     """Checked investigation, reviewed historical clues, then best-effort local persistence."""
     started_run = time.monotonic()
@@ -472,38 +625,69 @@ def investigate_submission(
     if not 1 <= since_minutes <= 120 or not 1 <= max_seconds <= 180:
         raise ValueError("로그 조회는 1~120분, 조사 시간은 1~180초 범위여야 합니다")
     deadline = started_run + max_seconds
-    if len(provided_logs.encode("utf-8")) > MAX_LOG_BYTES:
-        raise ValueError("제공 로그는 300 KB 이하여야 합니다")
+    if type(memory_enabled) is not bool:
+        raise ValueError("기억 검색 선택은 bool이어야 합니다")
+    run_id = observer.run_id if observer is not None else uuid4().hex
+    incident_id = previous_result["incident_id"] if previous_result else uuid4().hex
+    if observer is not None and observer_output_dir is not None:
+        raise ValueError("계측 객체와 계측 출력 경로 중 하나만 지정해 주세요")
+    if observer_output_dir is not None:
+        from .nat_observability import InvestigationObserver
+        observer = InvestigationObserver(run_id, observer_output_dir)
+    if not isinstance(provided_logs, str):
+        raise ValueError("제공 로그는 문자열이어야 합니다")
     seed_policy = None
+    profile_value = project_profile or (os.getenv("TRACEBRIDGE_PROJECT_PROFILE") if not registered_seed else None)
+    profile = load_project_profile(profile_value) if isinstance(profile_value, (str, Path)) else profile_value
+    if profile is not None and not isinstance(profile, ProjectProfile):
+        raise ValueError("등록된 프로젝트 설정을 선택해 주세요")
     if registered_seed:
         from .seed_project import registered_seed as seed_registration, seed_catalog
         from .change_policy import WORKSPACE, safe_path
-        if repo or catalog or log_file or provided_logs or include_docker_logs or registered_log_scope:
+        if repo or catalog or log_file or _has_provided_source(provided_logs) or include_docker_logs or registered_log_scope or profile:
             raise ValueError("등록 씨드의 코드·관측 연결은 등록부에서만 선택합니다")
         seed_policy, _, _ = seed_registration()
         project = safe_path(WORKSPACE, seed_policy.source_root)
         catalog = seed_catalog()
         context = context or ReportContext()
+    elif profile:
+        project = profile.root.resolve(strict=True)
+        if not project.is_dir() or repo and repo.resolve() != project:
+            raise ValueError("프로젝트 설정과 코드 루트가 다릅니다")
+        if include_docker_logs:
+            raise ValueError("프로젝트 설정의 로컬 JSON/JSONL 소스만 지원합니다")
+        if catalog and catalog.project_id != profile.project_id:
+            raise ValueError("사건 목록과 프로젝트 설정의 프로젝트가 다릅니다")
+        context = context or ReportContext()
     else:
         project = validate_agolive_repo(repo or agolive_repo_path())
-    configured_events = None if registered_seed else os.getenv("TRACEBRIDGE_EVENTS_FILE")
+    configured_events = None if registered_seed or profile else os.getenv("TRACEBRIDGE_EVENTS_FILE")
     if catalog is None and configured_events:
         catalog = LocalEventCatalog.from_file(configured_events)
-    project_id = catalog.project_id if catalog else "agolive"
-    configured_log = None if registered_seed else os.getenv("TRACEBRIDGE_LOG_FILE")
+    project_id = profile.project_id if profile else catalog.project_id if catalog else "agolive"
+    configured_log = None if registered_seed or profile else os.getenv("TRACEBRIDGE_LOG_FILE")
     log_file = log_file or (Path(configured_log) if configured_log else None)
     binding = {
         "project_id": project_id, "repo": str(project),
         "log_file": str(log_file.resolve()) if log_file else None,
         "event_source": catalog.source_kind if catalog else None,
         "event_locator": catalog.locator if catalog else None,
-        "registration": {"service": "seed-api", "environment": "dev"} if registered_seed else registered_log_scope if registered_log_scope is not None else {key: os.getenv(name) for key, name in (("service", "TRACEBRIDGE_LOG_SERVICE"), ("environment", "TRACEBRIDGE_LOG_ENVIRONMENT"), ("timezone", "TRACEBRIDGE_LOG_TIMEZONE")) if os.getenv(name)},
+        "registration": {"service": "seed-api", "environment": "dev"} if registered_seed else
+                        {"service": profile.service, "environment": profile.environment} if profile else
+                        registered_log_scope if registered_log_scope is not None else {key: os.getenv(name) for key, name in (("service", "TRACEBRIDGE_LOG_SERVICE"), ("environment", "TRACEBRIDGE_LOG_ENVIRONMENT"), ("timezone", "TRACEBRIDGE_LOG_TIMEZONE")) if os.getenv(name)},
         "docker": include_docker_logs,
+        "profile": _profile_binding(profile, deadline), "provided_log_connected": _has_provided_source(provided_logs),
     }
     # The binding stays in this local session; expose no source paths to the reporter.
     binding_id = hashlib.sha256(json.dumps(binding, sort_keys=True).encode()).hexdigest()
     session = deepcopy(previous_result.get("session", {})) if previous_result else {}
-    if previous_result and (previous_result.get("project_id") != project_id or session.get("source_binding") != binding_id):
+    permitted_bindings = {binding_id}
+    if previous_result and profile is None:
+        previous_provided = any(item.get("source") == "provided-log" for item in previous_result.get("log_scope", {}).get("sources", []))
+        if previous_provided == _has_provided_source(provided_logs):
+            legacy = {key: value for key, value in binding.items() if key not in {"profile", "provided_log_connected"}}
+            permitted_bindings.add(hashlib.sha256(json.dumps(legacy, sort_keys=True).encode()).hexdigest())
+    if previous_result and (previous_result.get("project_id") != project_id or session.get("source_binding") not in permitted_bindings):
         raise ValueError("같은 사건의 프로젝트·자료 연결이 바뀌었습니다. 새 제보로 접수해 주세요")
     if previous_result:
         if not text.strip() and not image:
@@ -537,6 +721,7 @@ def investigate_submission(
     screenshot_evidence = [Evidence(item["id"], "screenshot", item["source"], item["content"]) for item in clues if "content" in item]
     model_calls = 0
     usage = {"prompt_tokens": 0, "completion_tokens": 0}
+    usage_missing_calls = {"prompt_tokens": 0, "completion_tokens": 0}
     steps, proposal, model_trace = [], None, []
     terminal_status = None
     timeout_reasons = []
@@ -584,7 +769,7 @@ def investigate_submission(
                                                     if value is not None and getattr(base_context, key) is None})
         except ValueError:
             notes.append("사진의 날짜·시각을 확인하지 못했습니다. 대략적인 시각을 글로 보완해 주세요")
-    tools = ProjectTools(project, report, log_file=log_file, provided_logs=provided_logs, include_docker=include_docker_logs, since_minutes=since_minutes, context=base_context, project_id=project_id, registered_log_scope=binding["registration"], identity_report=identity_report, deadline=deadline, seed_policy=seed_policy)
+    tools = ProjectTools(project, report, log_file=log_file, provided_logs=provided_logs, include_docker=include_docker_logs, since_minutes=since_minutes, context=base_context, project_id=project_id, registered_log_scope=binding["registration"], identity_report=identity_report, deadline=deadline, seed_policy=seed_policy, profile=profile)
     tools.evidence.extend(screenshot_evidence)
     calls = 0
 
@@ -613,22 +798,69 @@ def investigate_submission(
             except (ValueError, ValidationError, TypeError, OSError):
                 output, status = {"error": "등록된 도구와 허용된 인자만 사용할 수 있습니다"}, "rejected"
                 terminal_status = "PARTIAL_FAILURE"
-            steps.append({"tool": name, "phase": phase, "status": status, "evidence_ids": [item["id"] for item in output.get("evidence", [])], "elapsed_ms": round((time.monotonic() - started) * 1000)})
+            lookup_status = "OBSERVED" if output.get("evidence") else "NO_MATCH" if name == "search_code" and status == "success" else "UNOBSERVED"
+            output["lookup_status"] = lookup_status
+            query = {key: [redact(value[:80]) for value in arguments[key][:8] if isinstance(value, str)] for key in ("terms", "services") if isinstance(arguments.get(key), list)}
+            purpose = arguments.get("purpose")
+            steps.append({"tool": name, "phase": phase, "status": status, "lookup_status": lookup_status,
+                          "purpose": redact(purpose[:160]) if isinstance(purpose, str) and purpose else {
+                              "find_logs": "현재 관측 범위와 반증 확인", "search_code": "증상과 연결되는 코드 단서 조회",
+                              "get_contract": "현재 요청과 등록 계약의 차이 확인", "get_version": "로컬 자료와 실행 버전 비교",
+                          }.get(name, "등록 자료 확인"), "query": query,
+                          "evidence_ids": [item["id"] for item in output.get("evidence", [])], "elapsed_ms": round((time.monotonic() - started) * 1000)})
+            emit_tool(steps[-1])
             return output
         steps.append({"tool": name, "phase": phase, "status": status, "evidence_ids": []})
+        emit_tool(steps[-1])
         return output
+
+    def emit_tool(step):
+        if observer is not None:
+            try:
+                observer.record_tool(step["tool"], phase=step["phase"],
+                    status={"success": "success", "timed_out": "timeout", "rejected": "rejected"}.get(step["status"], "failed"),
+                    elapsed_ms=step.get("elapsed_ms"))
+            except Exception as exc:
+                notes.append("도구 계측 실패: " + type(exc).__name__)
+
+    def emit_model(call, returned_usage=None):
+        observed_usage = {key: getattr(returned_usage, key, None) if returned_usage is not None else None for key in usage}
+        call["usage"] = observed_usage
+        for key, value in observed_usage.items():
+            if type(value) is int and value >= 0:
+                usage[key] += value
+            else:
+                usage_missing_calls[key] += 1
+        if observer is not None:
+            try:
+                observer.record_model(call.get("model", model), phase=call.get("phase", "investigation"),
+                    status="success" if call["status"] == "response" else "timeout" if "timeout" in call["status"].lower() else "failed",
+                    elapsed_ms=call.get("elapsed_ms"), usage=observed_usage, response_id=call.get("response_id"),
+                    http_status=call.get("http_status"), error_type=call["status"] if call["status"] != "response" else None)
+            except Exception as exc:
+                notes.append("모델 계측 실패: " + type(exc).__name__)
 
     def rule_result() -> dict:
         if not report.strip():
-            return empty_result(project_id, incident_id=previous_result["incident_id"] if previous_result else None)
+            decision = empty_result(project_id, incident_id=incident_id)
+            decision["run_id"] = run_id
+            return decision
         selected_catalog = catalog or tools.log_catalog
-        decision = triage_report(identity_report or "사진 제보", selected_catalog, incident_id=previous_result["incident_id"] if previous_result else None, **tools.context.to_dict())
+        decision = triage_report(identity_report or "사진 제보", selected_catalog, incident_id=incident_id,
+            source_adapter=(lambda source: ProjectEvidenceSource(profile, event_source=source)) if profile else None,
+            **tools.context.to_dict())
+        decision["run_id"] = run_id
+        selected = selected_catalog.events.get(decision.get("trace_id"))
+        tools.selected_source, tools.selected_trace_id = (selected[0], decision["trace_id"]) if selected else (None, None)
         tools.catalog_conflicts = selected_catalog_conflicts(catalog, decision["trace_id"], tools.log_catalog) if catalog else []
-        if catalog and (tools.catalog_conflicts or tools.log_catalog.conflicting_ids or not tools.log_catalog.complete and decision["route"] in {"GUIDANCE", "WORK_CANDIDATE"}):
+        if catalog and (tools.catalog_conflicts or tools.log_catalog.conflicting_ids or not tools.log_catalog.complete):
             held = empty_result(project_id, incident_id=decision["incident_id"])
+            held["run_id"] = run_id
             held["observations"] = decision["observations"]
             held["evidence"] = decision["evidence"]
             held["observed_status"] = None
+            held["reported_status"] = decision.get("reported_status")
+            held["claim_items"] = [{**item, "status": "UNVERIFIABLE", "observed": None} for item in decision.get("claim_items", [])]
             held["scope"] = decision.get("scope", {})
             held["candidates"] = decision["candidates"]
             held["candidate_trace_ids"] = [decision["trace_id"]] if decision["trace_id"] else []
@@ -637,7 +869,7 @@ def investigate_submission(
             decision = held
         return decision
 
-    if report.strip() and (log_file or provided_logs or include_docker_logs):
+    if report.strip() and (log_file or _has_provided_source(provided_logs) or include_docker_logs or profile):
         read_tool("find_logs", {}, phase="correlation")
     else:
         tools._load_logs() if report.strip() else None
@@ -658,9 +890,12 @@ def investigate_submission(
             timeout_reasons.append("model")
     if image and not fast and use_nvidia and len(visible.strip()) < 20 and model_client:
         started = time.monotonic()
+        vision_call_number = None
+        vision_emitted = False
         try:
             vision_timeout = remaining_timeout(deadline, 45.0)
             model_calls += 1
+            vision_call_number = model_calls
             response = model_client.chat.completions.create(
                 model=VISION_MODEL, temperature=0.2, max_tokens=1000, stream=False,
                 timeout=vision_timeout,
@@ -672,12 +907,15 @@ def investigate_submission(
                     {"type": "image_url", "image_url": {"url": data_url}},
                 ]}],
             )
-            if response.usage:
-                usage["prompt_tokens"] += response.usage.prompt_tokens or 0
-                usage["completion_tokens"] += response.usage.completion_tokens or 0
             message = response.choices[0].message
             description = next((call for call in message.tool_calls or [] if call.function.name == "describe_screen"), None)
             observation = PhotoObservation.model_validate_json(description.function.arguments) if description else PhotoObservation.model_validate(_parse_json(message.content or ""))
+            model_trace.append({"call": vision_call_number, "status": "response", "model": VISION_MODEL,
+                                "phase": "input_processing", "response_id": getattr(response, "id", None),
+                                "mode": "CLIENT_SUPPLIED" if client else "NVIDIA_LIVE", "tools": ["describe_screen"],
+                                "elapsed_ms": round((time.monotonic() - started) * 1000)})
+            emit_model(model_trace[-1], response.usage)
+            vision_emitted = True
             service_calls.append({"service": "Nemotron vision NIM", "phase": "input_processing", "model": VISION_MODEL, "status": "success", "image_sha256": image_hash, "elapsed_ms": round((time.monotonic() - started) * 1000)})
             if observation.has_app_screen:
                 symptom = redact(observation.visible_symptom)
@@ -693,23 +931,30 @@ def investigate_submission(
         except Exception as exc:
             service_calls.append({"service": "Nemotron vision NIM", "phase": "input_processing", "model": VISION_MODEL, "status": "failed", "http_status": getattr(exc, "status_code", None), "image_sha256": image_hash, "elapsed_ms": round((time.monotonic() - started) * 1000)})
             notes.append(f"사진의 시각적 증상 해석 실패: {type(exc).__name__}")
-            terminal_status = "TIMED_OUT" if isinstance(exc, DeadlineExceeded) else "PARTIAL_FAILURE"
+            if vision_call_number is not None and not vision_emitted:
+                model_trace.append({"call": vision_call_number, "status": type(exc).__name__, "model": VISION_MODEL,
+                                    "phase": "input_processing", "http_status": getattr(exc, "status_code", None),
+                                    "elapsed_ms": round((time.monotonic() - started) * 1000)})
+                emit_model(model_trace[-1])
+            terminal_status = "TIMED_OUT" if isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower() else "PARTIAL_FAILURE"
             if terminal_status == "TIMED_OUT":
                 timeout_reasons.append("vision")
     fast = result["route"] in {"GUIDANCE", "WORK_CANDIDATE"}
     waiting_for_selection = result["correlation"] == "CONTEXT_CANDIDATE" and result["finding_status"] in {"CONFIRMED_MISMATCH", "OBSERVED_VALIDATION"}
     if report.strip():
         read_tool("get_version", {}, phase="provenance")
-    if time.monotonic() < deadline:
+    if not memory_enabled:
+        memory_search = search_memory(project_id, report[:12000], db_path=db_path, enabled=False)
+    elif time.monotonic() < deadline:
         memory_current = {
             **result, "observations": [*result["observations"], *[item.to_dict() for item in tools.evidence if item.kind == "log"]],
             "version_provenance": {**result["version_provenance"], **tools.versions()},
-            "log_scope": {"connected": bool(tools.log_inputs), "aggregate": tools.log_catalog.completeness(additional_conflicts=tools.catalog_conflicts)},
+            "log_scope": tools.collection_scope(),
             "steps": steps,
         }
         observed_signals, reported_signals = current_signals(memory_current), signals_from_text(report)
         search_signals = {key: list(dict.fromkeys([*observed_signals[key], *reported_signals[key]]))[:8] for key in observed_signals}
-        memory_search = search_memory(project_id, report[:12000], signals=search_signals, exclude_incident_id=result["incident_id"], db_path=db_path)
+        memory_search = search_memory(project_id, report[:12000], signals=search_signals, exclude_incident_id=result["incident_id"], db_path=db_path, enabled=memory_enabled)
         memory_search = recheck_memory(memory_search, memory_current)
     else:
         memory_search = {"status": "SKIPPED_TIME_BUDGET", "hit_count": 0, "cards": [], "elapsed_ms": 0}
@@ -731,6 +976,7 @@ def investigate_submission(
             final_round = finish_after_service_error or model_calls == MAX_MODEL_CALLS - 1 or calls >= MAX_TOOL_CALLS
             budget_limited = budget_limited or (final_round and not finish_after_service_error)
             started_call = time.monotonic()
+            call_number, response_usage = None, None
             try:
                 kwargs = {"model": model, "messages": messages, "temperature": 0.2, "max_tokens": 900, "stream": False, "extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
                 if not final_round:
@@ -745,10 +991,9 @@ def investigate_submission(
                     kwargs.update(max_tokens=700, tools=[FINISH_TOOL], tool_choice={"type": "function", "function": {"name": "finish_investigation"}})
                 kwargs["timeout"] = remaining_timeout(deadline, 45.0)
                 model_calls += 1
+                call_number = model_calls
                 response = model_client.chat.completions.create(**kwargs)
-                if response.usage:
-                    usage["prompt_tokens"] += response.usage.prompt_tokens or 0
-                    usage["completion_tokens"] += response.usage.completion_tokens or 0
+                response_usage = response.usage
                 message = response.choices[0].message
                 model_trace.append({"call": model_calls, "status": "response", "model": model,
                                     "response_id": getattr(response, "id", None), "finish_reason": getattr(response.choices[0], "finish_reason", None),
@@ -757,10 +1002,15 @@ def investigate_submission(
                 final_call = next((call for call in message.tool_calls or [] if call.function.name == "finish_investigation"), None)
                 if final_call:
                     proposal = FinalArguments.model_validate_json(final_call.function.arguments).conclusion()
+                    emit_model(model_trace[-1], response_usage)
                     break
                 if not message.tool_calls:
                     proposal = Conclusion.model_validate(_parse_json(message.content or ""))
+                    emit_model(model_trace[-1], response_usage)
                     break
+                if final_round:
+                    raise ValueError("Final return required after the investigation budget")
+                emit_model(model_trace[-1], response_usage)
                 serialized_calls = [{"id": call.id, "type": "function", "function": {"name": call.function.name, "arguments": call.function.arguments}} for call in message.tool_calls]
                 messages.append({"role": "assistant", "content": message.content or "", "tool_calls": serialized_calls})
                 for call in message.tool_calls:
@@ -771,10 +1021,18 @@ def investigate_submission(
                         output = {"error": "등록된 도구와 허용된 인자만 사용할 수 있습니다"}
                         terminal_status = "PARTIAL_FAILURE"
                         steps.append({"tool": call.function.name, "phase": "investigation", "status": "rejected", "evidence_ids": []})
+                        emit_tool(steps[-1])
                     messages.append({"role": "tool", "name": call.function.name, "tool_call_id": call.id, "content": json.dumps(output, ensure_ascii=False)})
             except Exception as exc:
                 http_status = getattr(exc, "status_code", None)
-                model_trace.append({"call": model_calls, "status": type(exc).__name__, "http_status": http_status, "elapsed_ms": round((time.monotonic() - started_call) * 1000)})
+                error_call = {"call": call_number or model_calls, "status": type(exc).__name__, "model": model,
+                              "http_status": http_status, "elapsed_ms": round((time.monotonic() - started_call) * 1000)}
+                if model_trace and model_trace[-1]["call"] == call_number:
+                    model_trace[-1].update(error_call)
+                elif call_number is not None:
+                    model_trace.append(error_call)
+                if call_number is not None and "usage" not in model_trace[-1]:
+                    emit_model(model_trace[-1], response_usage)
                 notes.append(f"NVIDIA 조사 호출/결과 처리 실패: {type(exc).__name__}" + (f" (HTTP {http_status})" if http_status else ""))
                 terminal_status = "TIMED_OUT" if isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower() else "PARTIAL_FAILURE"
                 if terminal_status == "TIMED_OUT":
@@ -793,6 +1051,10 @@ def investigate_submission(
             notes.append("NVIDIA API 키가 없어 로컬 검색만 수행했습니다")
             terminal_status = "PARTIAL_FAILURE"
 
+    # A later query may expose a conflict or a partial read. Recompute the rule
+    # decision instead of retaining an earlier candidate through model finalization.
+    result = rule_result()
+    fast = result["route"] in {"GUIDANCE", "WORK_CANDIDATE"}
     checked = _checked_current_hypotheses(proposal, tools, result)
     missing = [redact(question[:240]) for question in proposal.missing_information[:2]] if proposal else []
     technical = re.compile(r"(?i)trace|request.?id|\bHTTP\b|\bAPI\b|\bSQL\b|\bSHA\b|method|endpoint|commit|hash|로그|배포|마이그레이션|docker|코드|설정|서버|부하|backend|realtime|메서드|엔드포인트|커밋|해시|비밀번호|토큰|api.?key")
@@ -825,14 +1087,16 @@ def investigate_submission(
         symptom_summary=redact(proposal.symptom_summary) if proposal and re.search(r"[가-힣]", proposal.symptom_summary) else (session["text"][:500] or "사진 제보: 화면과 동작 확인 필요"),
         repository_revision=tools.revision, source_tree_dirty=tools.dirty,
         configured_deployed_revision=tools.deployed_revision, deployed_revision=versions["runtime"].get("sha"),
-        deployment_observed=versions["runtime"].get("status") == "OBSERVED",
+        deployment_observed=versions["runtime"].get("status") == "OBSERVED" and tools.runtime_revision.get("deployment_observed", not bool(profile)),
         version_provenance={**result["version_provenance"], **versions},
-        log_scope={"requested": tools.context.to_dict(), "sources": tools.log_scope, "aggregate": tools.log_catalog.completeness(additional_conflicts=tools.catalog_conflicts), "connected": bool(tools.log_inputs), "failures": tools.failures},
+        log_scope=tools.collection_scope(),
         input_modes=modes, hypotheses=checked, questions=questions, missing_information=missing,
         next_steps=[redact(step[:400]) for step in proposal.next_steps[:3]] if proposal else ([result["next_action"]] if fast else []),
         report_clues=clues[:16], observations=[*result["observations"], *logs], evidence=current_evidence,
         steps=steps, service_calls=service_calls, model=model if model_calls else None,
-        model_calls=model_calls, usage=usage, model_trace=model_trace,
+        model_calls=model_calls,
+        usage={key: value if not usage_missing_calls[key] else None for key, value in usage.items()},
+        model_trace=model_trace,
         session_model_calls=(previous_result.get("session_model_calls", 0) if previous_result else 0) + model_calls,
         notes=list(dict.fromkeys([*notes, *tools.notes])),
         run_status=run_status, stop_reason={"COMPLETED": "rule_decision" if fast else "bounded_investigation_finished", "WAITING_CONTEXT": "context_needed", "PARTIAL_FAILURE": "service_or_tool_failure", "TIMED_OUT": "time_limit_or_model_timeout", "BUDGET_EXHAUSTED": "call_limit"}[run_status],
@@ -844,6 +1108,22 @@ def investigate_submission(
         history=history[-6:],
         hypothesis_updates=_hypothesis_update(previous_result, proposal, tools, result),
     )
+    result["log_scope"]["assessment"] = {key: deepcopy(result[key]) for key in (
+        "contract_analysis", "responsibility", "symptom_status", "product_status") if key in result}
+    result["log_scope"]["investigation"] = {
+        "final_return_status": "VALIDATED" if proposal else "NOT_REQUIRED_RULE_DECISION" if fast else "NOT_RETURNED",
+        "requested_action": session["action_preference"], "memory_enabled": memory_enabled,
+        "model_calls": model_calls, "tool_attempts": len(steps),
+        "returned_usage_sum": usage, "usage_missing_calls": usage_missing_calls,
+        "lookup_records": steps,
+    }
+    if observer is not None:
+        try:
+            result["observability"] = observer.finish(run_status, stop_reason=result["stop_reason"],
+                expected_tool_calls=len(steps), expected_model_calls=model_calls)
+            result["log_scope"]["observability"] = result["observability"]
+        except Exception as exc:
+            result["observability"] = {"status": "FAILED", "error_type": type(exc).__name__, "main_flow_verified": False}
     confirmation = session.pop("candidate_confirmation", None)
     if confirmation:
         result["correlation_confirmation"] = {**confirmation, "current_match": result["correlation"] == "EXACT_ID"}

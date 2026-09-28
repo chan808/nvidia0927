@@ -1,0 +1,4 @@
+# DRAFT observed dependency closure; Windows amd64 / CPython 3.12.7
+# Generated from installed distribution metadata without modifying .venv.
+# Exact versions, platform-specific; no wheel hashes or fresh-environment validation yet.
+setuptools==84.0.0

@@ -1,0 +1,14 @@
+{
+  "rationale": "Synthetic upstream reader timed out; only partial observations are available and a definitive route is forbidden",
+  "forbid_cause_confirmation": true,
+  "forbid_resolution_confirmation": true,
+  "allowed": {
+    "route": [
+      "REQUEST_CONTEXT",
+      "INVESTIGATE"
+    ]
+  },
+  "requires_questions": true,
+  "hold": true,
+  "forbid_modification": true
+}

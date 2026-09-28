@@ -138,7 +138,8 @@ def test_catalog_and_current_log_status_conflict_holds_both_fast_routes(trace_id
     result = investigate_catalog_log(record, trace_id=trace_id)
     assert result["route"] == "REQUEST_CONTEXT" and result["correlation"] == "NEEDS_CONTEXT"
     assert result.get("observed_status") is None and result["diagnosis_type"] is None
-    assert result["claim_status"] == "UNVERIFIABLE" and result["claim_items"] == []
+    assert result["claim_status"] == "UNVERIFIABLE" and result["claim_items"]
+    assert all(item["status"] == "UNVERIFIABLE" and item.get("observed") is None for item in result["claim_items"])
     assert result["run_status"] == "WAITING_CONTEXT" and result["model_calls"] == 0
     assert "사건 목록" in result["route_reason"] and "현재 로그" in result["route_reason"]
     aggregate = result["log_scope"]["aggregate"]
@@ -433,6 +434,12 @@ def test_docker_timeout_preserves_file_observations_and_blocks_model_calls(monke
         raise subprocess.TimeoutExpired(command, kwargs["timeout"])
 
     monkeypatch.setattr(project_sources.subprocess, "run", process)
+    def docker(*args, deadline=None, **kwargs):
+        from tracebridge.deadline import DeadlineExceeded, remaining_timeout
+        timeouts.append(remaining_timeout(deadline, 30))
+        clock.value = 1.1
+        raise DeadlineExceeded("docker_logs")
+    monkeypatch.setattr(report_agent, "docker_compose_logs", docker)
     result = investigate_submission("500 requestId=intake-server", repo=REPO, log_file=file, include_docker_logs=True, context=ReportContext(occurred_at=record["trace"]["occurred_at"]), use_nvidia=True, client=finish_client(), max_seconds=1)
     assert timeouts == [1] and result["run_status"] == "TIMED_OUT"
     assert result["model_calls"] == 0 and "docker_logs" in result["timeout_reasons"]

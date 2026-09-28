@@ -1,0 +1,38 @@
+{
+  "artifact_status": "TEMPLATE_NOT_A_RESULT",
+  "suite_sha256": "COPY_SHA256_OF_SUITE_JSON",
+  "observations": [
+    {
+      "condition": "coding_agent",
+      "case_id": "contract-1",
+      "memory_enabled": false,
+      "execution_scope": "prepare_change_with_human",
+      "resource_contract_sha256": "d95747a84a9fb936e3392aa7088f970aeee8177fc20e38bd6afde0a020e6c26e",
+      "source_ref": "raw/coding-agent-contract-1.json",
+      "result": {
+        "route": "REPLACE_WITH_CHECKED_RESULT",
+        "cause_confirmed": null,
+        "fix_applied": null,
+        "fix_verified": null,
+        "questions": [],
+        "change": {
+          "status": "NOT_ATTEMPTED"
+        }
+      },
+      "measurements": {
+        "model_calls": null,
+        "model_events": null,
+        "tool_calls": null,
+        "external_model_calls": null,
+        "service_calls": null,
+        "total_elapsed_ms": null,
+        "human_seconds": null,
+        "manual_actions": null,
+        "human_measurement_ref": null,
+        "human_measurement_sha256": null
+      },
+      "source_sha256": "REPLACE_WITH_SHA256_OF_RECORDED_SOURCE",
+      "execution_origin": "REPLACE_WITH_RECORDED_LIVE_REPLAY_DOUBLE_OR_HUMAN"
+    }
+  ]
+}

@@ -303,7 +303,7 @@ def test_card_instructions_and_historical_ids_cannot_grant_tools_or_support_curr
         assert "Historical investigation clues" in prompt
         assert f"historical:{old['run_id']}:R1" in prompt
         assert "approval is not factual verification" in kwargs["messages"][0]["content"]
-        assert {tool["function"]["name"] for tool in kwargs["tools"]} == {"search_code", "find_logs", "finish_investigation"}
+        assert {tool["function"]["name"] for tool in kwargs["tools"]} == {"search_code", "find_logs", "get_contract", "finish_investigation"}
         name, arguments = ("run_shell", {"command": "write source"}) if len(calls) == 1 else ("finish_investigation", {"intent": "investigate", "symptom_summary": "제보", "cause": "과거 카드 원인", "supporting_evidence_ids": [f"historical:{old['run_id']}:R1", "R1"]})
         call = SimpleNamespace(id=str(len(calls)), function=SimpleNamespace(name=name, arguments=json.dumps(arguments)))
         return SimpleNamespace(usage=None, choices=[SimpleNamespace(message=SimpleNamespace(content=None, tool_calls=[call]))])
@@ -452,9 +452,12 @@ def test_package_excludes_database_backups_temp_and_renamed_sqlite(tmp_path, mon
     examples.mkdir()
     for name in ("safe.json", "private.db.json", "private.sqlite3.backup.json", "private.tmp.json"):
         (examples / name).write_text("{}", encoding="utf-8")
+    (examples / "events.jsonl").write_text('{"data_kind":"synthetic"}\n', encoding="utf-8")
     (examples / "tmp").mkdir()
     (examples / "tmp" / "private.json").write_text("{}", encoding="utf-8")
     with sqlite3.connect(examples / "renamed.json") as connection:
         connection.execute("CREATE TABLE private_record(secret TEXT)")
     with ZipFile(package_submission.create_package("memory-check")) as archive:
-        assert set(archive.namelist()) == {"README.md", "examples/safe.json"}
+        assert set(archive.namelist()) == {"README.md", "examples/safe.json", "examples/events.jsonl", "DRAFT_NOTICE.md", "DRAFT_PACKAGE_MANIFEST.json"}
+        manifest = json.loads(archive.read("DRAFT_PACKAGE_MANIFEST.json"))
+        assert set(manifest["files"]) == {"README.md", "examples/safe.json", "examples/events.jsonl"}

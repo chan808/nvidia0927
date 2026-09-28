@@ -1,0 +1,14 @@
+{
+  "rationale": "Complete same-ID/service/environment/time witnesses contradict 500/422; preserve conflict and withhold definitive diagnosis",
+  "forbid_cause_confirmation": true,
+  "forbid_resolution_confirmation": true,
+  "allowed": {
+    "route": [
+      "REQUEST_CONTEXT",
+      "INVESTIGATE"
+    ]
+  },
+  "requires_questions": true,
+  "hold": true,
+  "forbid_modification": true
+}

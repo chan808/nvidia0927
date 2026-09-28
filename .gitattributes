@@ -1,2 +1,5 @@
 examples/seed_signup/* text eol=lf
 examples/change_policy/*.json text eol=lf
+# Frozen evaluation hashes include the original CRLF bytes.
+examples/evaluation/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+examples/parallel_b/** text=auto eol=lf

@@ -1,0 +1,8 @@
+{
+  "code_version": "ledger-r1",
+  "operations": {
+    "POST /accounts": {
+      "schema": {"required": ["accountId", "name"], "properties": {"accountId": "str", "name": "str"}}
+    }
+  }
+}

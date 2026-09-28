@@ -1,3 +1,8 @@
+# Auxiliary SYNTHETIC FIXTURE workflow. Loading/installing/running this file
+# does not verify main report_agent tool/model instrumentation or Skill API eligibility.
+# scripts.run_nat defaults to offline fixture mode; --live is an explicit future gate.
+# Main investigation uses tracebridge.nat_observability.InvestigationObserver;
+# attach NATEventSink to an active Context.intermediate_step_manager after integration.
 functions:
   trace:
     _type: tracebridge_trace

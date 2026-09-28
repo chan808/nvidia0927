@@ -1,0 +1,16 @@
+{
+  "rationale": "Runtime version b disagrees with caller/contract/DTO version a; old repair evidence cannot select a current work candidate",
+  "forbid_cause_confirmation": true,
+  "forbid_resolution_confirmation": true,
+  "allowed": {
+    "route": [
+      "INVESTIGATE"
+    ]
+  },
+  "equals": {
+    "correlation": "EXACT_ID",
+    "trace_id": "memory-2"
+  },
+  "forbid_modification": true,
+  "hold": true
+}

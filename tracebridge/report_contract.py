@@ -100,6 +100,8 @@ def empty_result(project_id: str, *, incident_id: str | None = None) -> dict:
         "route": "REQUEST_CONTEXT", "route_reason": "제보와 실제 요청의 연결을 더 확인해야 합니다",
         "work_role": None, "diagnosis_type": None, "finding_status": "INCONCLUSIVE",
         "claim_status": "UNVERIFIABLE", "claim_items": [], "claim_coverage": "explicit_facts_only",
+        "symptom_status": "UNOBSERVED", "product_status": "UNCONFIRMED",
+        "responsibility": {"status": "UNCONFIRMED", "evidence_sources": []}, "contract_analysis": {},
         "summary": "현재 관측만으로 사건과 원인을 확인하지 못했습니다.", "next_action": "화면·동작·대략적인 시각을 보완해 주세요.",
         "observations": [], "report_clues": [], "evidence": [], "hypotheses": [],
         "questions": plain_questions(), "missing_information": [], "next_steps": [],
@@ -111,4 +113,40 @@ def empty_result(project_id: str, *, incident_id: str | None = None) -> dict:
         "cause_confirmed": False, "fix_applied": False, "fix_verified": False,
         "steps": [], "service_calls": [], "model_calls": 0,
         "usage": {"prompt_tokens": 0, "completion_tokens": 0}, "model_trace": [], "notes": [],
+    }
+
+
+def presentation_status(result: dict, change_job: dict | None = None) -> dict:
+    """Independent report, symptom, product and execution states for UI/CLI."""
+    collection = result.get("log_scope", {})
+    aggregate = collection.get("aggregate", {})
+    assessment = collection.get("assessment", {})
+    conflicts = bool(aggregate.get("conflicts") or aggregate.get("conflicting_trace_ids"))
+    status_item = next((item for item in result.get("claim_items", []) if item.get("facet") == "http_status"), {})
+    observed = result.get("observed_status")
+    response_states = sorted({item["response_status"] for item in collection.get("retained_observations", [])
+                              if type(item.get("response_status")) is int})
+    if type(observed) is int:
+        response_states = sorted(set([*response_states, observed]))
+    symptom = result.get("symptom_status") or assessment.get("symptom_status")
+    if not symptom or symptom == "UNOBSERVED":
+        symptom = "REQUEST_REJECTED" if any(value >= 400 for value in response_states) else "HTTP_SUCCESS_OBSERVED" if response_states else "UNOBSERVED"
+    product = result.get("product_status") or assessment.get("product_status") or "UNCONFIRMED"
+    responsibility = result.get("responsibility") or assessment.get("responsibility") or {"status": "UNCONFIRMED"}
+    if conflicts or aggregate.get("complete") is False:
+        product, responsibility = "UNCONFIRMED", {"status": "UNCONFIRMED"}
+    change = change_job or result.get("change", {})
+    return {
+        "reported_http_status": result.get("reported_status"),
+        "report_status_verification": status_item.get("status", "UNVERIFIABLE"),
+        "observed_http_statuses": response_states,
+        "actual_symptom_status": symptom,
+        "product_status": product, "responsibility_status": responsibility.get("status", "UNCONFIRMED"),
+        "collection_status": "INCOMPLETE" if aggregate.get("complete") is False else "COMPLETE" if aggregate.get("complete") is True else "UNOBSERVED",
+        "observations_conflict": conflicts,
+        "investigation_status": result.get("run_status", "WAITING_CONTEXT"),
+        "investigation_final_return": collection.get("investigation", {}).get("final_return_status", "NOT_RECORDED"),
+        "candidate_validation": "VERIFIED" if change.get("candidate_fix_verified") is True else "NOT_VERIFIED",
+        "original_application": "APPLIED" if change.get("original_applied") is True or result.get("fix_applied") is True else "NOT_APPLIED",
+        "service_recovery": change.get("service_recovery", "NOT_VERIFIED"),
     }

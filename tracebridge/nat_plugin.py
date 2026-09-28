@@ -5,6 +5,10 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from contextlib import contextmanager
+from contextvars import ContextVar
+import asyncio
+from uuid import uuid4
 
 from nat.builder.builder import Builder
 from nat.builder.framework_enum import LLMFrameworkEnum
@@ -13,17 +17,34 @@ from nat.cli.register_workflow import register_function
 from nat.data_models.function import FunctionBaseConfig
 
 from .evidence import get_backend_evidence, get_contract, get_migration_state, get_trace
+from .nat_observability import InvestigationObserver, NATEventSink
+
+
+_OBSERVER = ContextVar("tracebridge_nat_fixture_observer", default=None)
+
+
+@contextmanager
+def observed_fixture_run(observer: InvestigationObserver):
+    """Bind an isolated fixture observer; never counts as main-flow instrumentation."""
+    if observer.origin != "nat_fixture":
+        raise ValueError("Fixture tools require nat_fixture event provenance")
+    token = _OBSERVER.set(observer)
+    try:
+        yield
+    finally:
+        _OBSERVER.reset(token)
 
 
 def _bounded_tool(name: str, trace_id: str, provider) -> str:
     allowed = os.getenv("TRACEBRIDGE_ALLOWED_TRACE_ID")
     if allowed and trace_id != allowed:
         raise ValueError("Tool scope cannot move to a different trace ID")
-    result = provider(trace_id)
-    run_dir = Path(__file__).resolve().parents[1] / "generated"
-    run_dir.mkdir(exist_ok=True)
-    with (run_dir / "nat_tool_calls.jsonl").open("a", encoding="utf-8") as stream:
-        stream.write(json.dumps({"tool": name, "trace_id": trace_id}, ensure_ascii=False) + "\n")
+    observer = _OBSERVER.get()
+    if observer is None:
+        result = provider(trace_id)
+    else:
+        with observer.tool(name, phase="nat_fixture"):
+            result = provider(trace_id)
     return json.dumps(result, ensure_ascii=False)
 
 
@@ -41,6 +62,38 @@ class BackendConfig(FunctionBaseConfig, name="tracebridge_backend"):
 
 class MigrationConfig(FunctionBaseConfig, name="tracebridge_migration"):
     pass
+
+
+class MainInvestigationConfig(FunctionBaseConfig, name="tracebridge_main_investigation"):
+    """Optional direct wrapper for the same public main function; offline by default."""
+    repo_path: str | None = None
+    profile_path: str | None = None
+    output_dir: str = "output/parallel-d/nat-main"
+    memory_enabled: bool = True
+    use_nvidia: bool = False
+
+
+@register_function(config_type=MainInvestigationConfig)
+async def register_main_investigation(config: MainInvestigationConfig, _builder: Builder):
+    if not config.repo_path and not config.profile_path:
+        raise ValueError("Direct main NAT workflow requires an explicit repo or project profile")
+    async def _inner(report: str) -> str:
+        """Run the current report agent with isolated DB and NAT metadata events."""
+        from nat.builder.context import Context
+        from .report_agent import investigate_submission
+
+        observer = InvestigationObserver(uuid4().hex, config.output_dir, origin="main_investigation",
+            nat_sink=NATEventSink(Context.get().intermediate_step_manager))
+        result = await asyncio.to_thread(investigate_submission, report,
+            repo=Path(config.repo_path) if config.repo_path else None,
+            project_profile=config.profile_path, observer=observer,
+            memory_enabled=config.memory_enabled, use_nvidia=config.use_nvidia,
+            db_path=observer.output_dir / "memory.db")
+        # This only enables an instrumentation path. Actual main flow verification
+        # remains false until a frozen integration execution is reviewed.
+        return json.dumps(result, ensure_ascii=False)
+
+    yield FunctionInfo.from_fn(_inner, description="TraceBridge main investigation; offline unless configured otherwise, metadata-only NAT tracing")
 
 
 @register_function(config_type=TraceConfig, framework_wrappers=[LLMFrameworkEnum.LANGCHAIN])

@@ -1,0 +1,101 @@
+{
+  "case_id": "memory-2",
+  "project_id": "tracebridge-evaluation",
+  "report": "가입이 실패해요. traceId=memory-2 HTTP 422",
+  "context": {
+    "environment": "dev",
+    "service": "evaluation-api",
+    "occurred_at": "2026-09-20T12:00:00+00:00"
+  },
+  "events": [
+    {
+      "trace": {
+        "trace_id": "memory-2",
+        "service": "evaluation-api",
+        "environment": "dev",
+        "occurred_at": "2026-09-20T12:00:00+00:00",
+        "method": "POST",
+        "path": "/signup",
+        "operation": "signup",
+        "version": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "code_version": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "request": {
+          "displayName": "synthetic",
+          "user_id": "synthetic"
+        },
+        "response_status": 422
+      },
+      "logs": [],
+      "contract": {
+        "type": "object",
+        "required": [
+          "userId",
+          "displayName"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "dto": {
+        "type": "object",
+        "required": [
+          "userId",
+          "displayName"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "contract_context": {
+        "provenance": {
+          "kind": "synthetic_snapshot",
+          "source": "project/openapi.json",
+          "code_version": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "versions": {
+          "contract": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "dto": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "caller": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "caller": {
+          "source": "project/client.py",
+          "source_kind": "caller_code",
+          "source_sha256": "850984c29140ee2ffdcb4bfd49e48fa37ce5de857ace6e141f7a54bfb99b4f1f",
+          "source_verified": true,
+          "version": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "method": "POST",
+          "path": "/signup",
+          "field_mapping": {
+            "displayName": "name_input",
+            "user_id": "account_input"
+          },
+          "required_inputs": {
+            "userId": "account_input",
+            "displayName": "name_input"
+          },
+          "input_fields": [
+            "account_input",
+            "name_input"
+          ],
+          "input_types": {
+            "account_input": "string",
+            "name_input": "string"
+          }
+        }
+      }
+    }
+  ],
+  "complete": true
+}

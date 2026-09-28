@@ -7,10 +7,10 @@ from datetime import datetime
 import json
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Callable
 
-from .claims import METHOD_PATTERN, PATH_PATTERN
-from .evidence import EvidenceError, EvidenceSource, LocalBundleEvidenceSource
+from .claims import METHOD_PATTERN, PATH_PATTERN, assess_claim
+from .evidence import EvidenceError, EvidenceSource, LocalBundleEvidenceSource, verify_synthetic_context
 from .report_contract import TIME_WINDOW, empty_result, event_time, plain_questions
 from .project_sources import canonical_service, redact
 from .triage import analyze, route_verdict, summarize
@@ -60,7 +60,7 @@ def observation_conflicts(previous: dict, current: dict) -> set[str]:
     before, after = previous["trace"], current["trace"]
     before = {**before, "service": canonical_service(before.get("service"))}
     after = {**after, "service": canonical_service(after.get("service"))}
-    keys = ("service", "environment", "method", "path", "response_status", "operation", "version")
+    keys = ("service", "environment", "method", "path", "response_status", "operation", "version", "code_version", "request_types", "input_types")
     conflicts = {key for key in keys if _known_value_conflict(before.get(key), after.get(key))}
     if before.get("occurred_at") and after.get("occurred_at") and abs(_event_time(before["occurred_at"]) - _event_time(after["occurred_at"])) > TIME_WINDOW:
         conflicts.add("occurred_at")
@@ -69,7 +69,7 @@ def observation_conflicts(previous: dict, current: dict) -> set[str]:
         # Captured request field names remain comparable after values are masked.
         if first.keys() != second.keys() or _known_value_conflict(first, second):
             conflicts.add("request")
-    for key in ("contract", "dto", "migration"):
+    for key in ("contract", "dto", "migration", "contract_context", "caller"):
         if _known_value_conflict(previous.get(key), current.get(key)):
             conflicts.add(key)
     return conflicts
@@ -140,7 +140,15 @@ class ObservedEventSource:
         if "contract" not in self.event:
             raise EvidenceError("관측된 계약 자료가 없습니다")
         trace = self.get_trace(trace_id)
-        return {"openapi": deepcopy(self.event["contract"]), "backend_dto": deepcopy(self.event.get("dto")), "method": trace.get("method"), "path": trace.get("path")}
+        result = {"openapi": deepcopy(self.event["contract"]), "backend_dto": deepcopy(self.event.get("dto")), "method": trace.get("method"), "path": trace.get("path")}
+        context = self.event.get("contract_context", {})
+        if isinstance(context, dict):
+            context = verify_synthetic_context(context)
+            result.update({key: deepcopy(context[key]) for key in ("provenance", "versions", "dto_provenance", "caller")
+                           if isinstance(context.get(key), dict)})
+        if isinstance(self.event.get("caller"), dict):
+            result["caller"] = deepcopy(self.event["caller"])
+        return result
 
     def get_migration_state(self, trace_id):
         self._check(trace_id)
@@ -154,14 +162,22 @@ class ObservedEventCatalog:
 
     MAX_OBSERVATIONS = 100
 
-    def __init__(self, project_id: str, events: list[dict], *, complete: bool = True):
+    def __init__(self, project_id: str, events: list[dict], *, complete: bool = True,
+                 observation_count: int | None = None, source_states: list[dict] | None = None):
         self.project_id, self.source_kind = project_id, "registered_log"
-        self.observation_count = len(events)
-        self.complete = complete and self.observation_count <= self.MAX_OBSERVATIONS
+        self.source_states = deepcopy(source_states or [])
+        self.observation_count = max(len(events), observation_count if observation_count is not None else len(events))
+        self.complete = bool(complete and self.observation_count <= self.MAX_OBSERVATIONS
+                             and all(item.get("complete") is not False and item.get("available") is not False
+                                     and not item.get("deadline_exhausted") for item in self.source_states))
         self.observations = deepcopy(events)
         self.events: dict[str, tuple[ObservedEventSource, datetime]] = {}
         self.conflicting_ids: set[str] = set()
         self.conflicts: dict[str, set[str]] = {}
+        for state in self.source_states:
+            for conflict in state.get("conflicts", []):
+                self.conflicting_ids.add(conflict["trace_id"])
+                self.conflicts.setdefault(conflict["trace_id"], set()).update(conflict["fields"])
         # Inspect every supplied record, including those beyond the decision limit.
         for event in events:
             trace = event["trace"]
@@ -177,7 +193,7 @@ class ObservedEventCatalog:
                 merged = deepcopy(old[0].event)
                 merged["trace"].update({k: v for k, v in trace.items() if v is not None})
                 merged["logs"] = [*merged.get("logs", []), *event.get("logs", [])][:20]
-                for key in ("contract", "dto", "migration"):
+                for key in ("contract", "dto", "migration", "contract_context", "caller"):
                     if key in event:
                         merged[key] = deepcopy(event[key])
                 event = merged
@@ -188,12 +204,20 @@ class ObservedEventCatalog:
 
     def completeness(self, *, additional_conflicts: list[dict] | None = None) -> dict:
         conflicts = {id_: {"trace_id": id_, "fields": set(fields), "sources": set()} for id_, fields in self.conflicts.items()}
-        for item in additional_conflicts or []:
+        source_conflicts = [item for state in self.source_states for item in state.get("conflicts", [])]
+        for item in [*source_conflicts, *(additional_conflicts or [])]:
             target = conflicts.setdefault(item["trace_id"], {"trace_id": item["trace_id"], "fields": set(), "sources": set()})
             target["fields"].update(item["fields"])
             target["sources"].update(item["sources"])
+        reasons = list(dict.fromkeys(reason for state in self.source_states for reason in state.get("reasons", [])))
+        if self.observation_count > self.MAX_OBSERVATIONS:
+            reasons.append("observation_limit_reached")
+        if not self.complete and not reasons:
+            reasons.append("source_collection_incomplete")
         return {
             "observation_count": self.observation_count, "observation_limit": self.MAX_OBSERVATIONS,
+            "retained_observation_count": len(self.observations),
+            "collection_status": "COMPLETE" if self.complete else "INCOMPLETE", "incomplete_reasons": list(dict.fromkeys(reasons)),
             "complete": self.complete, "conflicting_trace_ids": sorted(self.conflicting_ids | conflicts.keys())[:5],
             "conflicts": [{"trace_id": id_, "fields": sorted(item["fields"]), **({"sources": sorted(item["sources"])} if item["sources"] else {})} for id_, item in sorted(conflicts.items())[:5]],
         }
@@ -247,12 +271,20 @@ def triage_report(
     service: str | None = None,
     operation: str | None = None,
     incident_id: str | None = None,
+    source_adapter: Callable[[EvidenceSource], EvidenceSource] | None = None,
 ) -> dict[str, Any]:
     """ID or bounded context selects one event; all diagnosis rules stay in triage."""
     if not isinstance(report, str) or not report.strip() or len(report) > 12000:
         raise ValueError("Report must contain 1 to 12000 characters including follow-up answers")
     when = _event_time(occurred_at) if occurred_at else None
     result = empty_result(catalog.project_id, incident_id=incident_id)
+    result["claim_status"], result["claim_items"] = assess_claim(report, None, trace_id)
+    result["reported_status"] = next((item.get("reported") for item in result["claim_items"]
+                                      if item.get("facet") == "http_status"), None)
+    result["log_scope"] = {"aggregate": catalog.completeness() if isinstance(catalog, ObservedEventCatalog) else {
+        "complete": True, "collection_status": "COMPLETE", "conflicts": [], "conflicting_trace_ids": [],
+        "observation_count": len(catalog.events), "source": catalog.source_kind,
+    }}
 
     def candidate(id_):
         trace = catalog.events[id_][0].get_trace(id_)
@@ -313,6 +345,12 @@ def triage_report(
         correlation = "CONTEXT_CANDIDATE"
         basis = "one candidate: environment, time ±5m" + (", service" if service else "") + (", operation" if selected_operation else "") + (", method/path" if selected_method and selected_path else "")
 
+    if source_adapter:
+        source = source_adapter(source)
+        try:
+            trace = source.get_trace(selected_id)
+        except EvidenceError:
+            return needs_context("현재 요청과 등록된 프로젝트의 자료 범위를 다시 확인해야 합니다.")
     verdict = analyze(selected_id, report, source=source)
     decision = route_verdict(verdict, correlation)
     summary = summarize(verdict)
@@ -332,4 +370,7 @@ def triage_report(
         stop_reason="rule_decision" if decision["route"] in {"GUIDANCE", "WORK_CANDIDATE"} else "investigation_needed",
         version_provenance={**result["version_provenance"], "event_snapshot": {"version": scope.get("version"), "source": catalog.source_kind, "deployment_observed": False}},
     )
+    for key in ("contract_analysis", "responsibility", "symptom_status", "product_status"):
+        if key in verdict:
+            result[key] = deepcopy(verdict[key])
     return result
