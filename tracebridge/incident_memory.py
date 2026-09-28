@@ -47,6 +47,13 @@ CREATE TABLE IF NOT EXISTS cards (
 );
 CREATE INDEX IF NOT EXISTS cards_project_review ON cards(project_id, review_status);
 CREATE VIRTUAL TABLE IF NOT EXISTS card_search USING fts5(card_id UNINDEXED, search_text);
+CREATE TABLE IF NOT EXISTS change_jobs (
+    work_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, incident_id TEXT NOT NULL,
+    source_run_id TEXT NOT NULL UNIQUE, result_run_id TEXT NOT NULL UNIQUE,
+    content_hash TEXT NOT NULL, record_json TEXT NOT NULL,
+    FOREIGN KEY (project_id, incident_id, source_run_id) REFERENCES runs(project_id, incident_id, run_id),
+    FOREIGN KEY (project_id, incident_id, result_run_id) REFERENCES runs(project_id, incident_id, run_id)
+);
 """
 
 
@@ -205,6 +212,7 @@ def _resume_session(result: dict) -> dict | None:
         "answers": [], "answer_count": session.get("answer_count", len(session.get("answers", []))),
         "received_at": session["received_at"], "context": _metadata(scope),
         "source_binding": session["source_binding"], "input_modes": session.get("input_modes", []),
+        "action_preference": session.get("action_preference", "UNSPECIFIED") if session.get("action_preference", "UNSPECIFIED") in {"UNSPECIFIED", "INVESTIGATE_ONLY", "PREPARE_ALLOWED"} else "UNSPECIFIED",
         "retention": "structured_clues_only",
     }
 
@@ -219,17 +227,18 @@ def minimal_record(result: dict) -> dict:
     record = {key: result[key] for key in (
         "contract_version", "project_id", "incident_id", "run_id", "trace_id", "correlation", "correlation_basis",
         "route", "work_role", "diagnosis_type", "finding_status", "claim_status", "claim_coverage",
-        "observed_status", "reported_status", "run_status", "stop_reason", "executed_at", "elapsed_ms",
+        "observed_status", "reported_status", "run_status", "stop_reason", "executed_at", "elapsed_ms", "message_received_at",
         "model", "model_calls", "session_model_calls", "deployment_observed", "input_modes",
+        "case_kind", "requested_action",
     ) if key in result}
     record = _metadata(record)
     record.update(revision=revision, record_format="minimal_sqlite_v1")
     for key in ("summary", "route_reason", "next_action"):
         record[key] = _text(result.get(key, ""))
-    for key in ("scope", "candidates", "candidate_trace_ids", "version_provenance", "log_scope", "usage", "timeout_reasons", "hypothesis_updates"):
+    for key in ("scope", "candidates", "candidate_trace_ids", "version_provenance", "log_scope", "usage", "timeout_reasons", "hypothesis_updates", "relative_date_basis", "correlation_confirmation"):
         record[key] = _metadata(result.get(key, [] if key in {"candidates", "candidate_trace_ids", "timeout_reasons", "hypothesis_updates"} else {}))
     record["steps"] = [_selected(step, ("tool", "phase", "status", "evidence_ids", "elapsed_ms")) for step in result.get("steps", [])]
-    record["model_trace"] = [_selected(call, ("call", "status", "http_status", "tools", "elapsed_ms")) for call in result.get("model_trace", [])]
+    record["model_trace"] = [_selected(call, ("call", "status", "http_status", "tools", "elapsed_ms", "model", "response_id", "finish_reason", "mode")) for call in result.get("model_trace", [])]
     record["service_calls"] = []
     for call in result.get("service_calls", []):
         saved = _selected(call, ("service", "phase", "model", "status", "image_sha256", "elapsed_ms", "http_status"))
@@ -266,6 +275,11 @@ def minimal_record(result: dict) -> dict:
     if session := _resume_session(result):
         record["session"] = session
     record["memory_search"] = _memory_record(result.get("memory_search", {}))
+    if "development_target" in result:
+        record["development_target"] = _selected(result["development_target"], ("target_id", "snapshot_sha256", "source_origin"))
+    if "change" in result:
+        record["change"] = _selected(result["change"], ("work_id", "source_run_id", "status", "review_status", "case_kind", "policy", "diff",
+            "candidate_fix_verified", "original_applied", "deployment_status", "service_recovery", "artifact_ref", "model_mode", "verification_scope"))
     return record
 
 
@@ -284,11 +298,12 @@ def _new_card(record: dict) -> dict:
         "version_provenance": record.get("version_provenance", {}),
         "evidence_refs": [f"historical:{record['run_id']}:{item['id']}" for item in record["observations"][:4]],
         "review": {"status": "PENDING", "revision": 0, "history": []},
+        **({"prepared_change": deepcopy(record["change"])} if "change" in record else {}),
     }
 
 
 class IncidentStore:
-    """Three tables plus FTS5, one local connection, atomic writes and bounded waits."""
+    """Local run/card records and minimal A2 jobs, atomic writes and bounded waits."""
 
     def __init__(self, path: str | Path | None = None):
         self.path = db_location(path)
@@ -298,10 +313,10 @@ class IncidentStore:
         try:
             self.connection.execute("PRAGMA foreign_keys=ON")
             version = self.connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1):
+            if version not in (0, 1, 2):
                 raise ValueError("Unsupported incident database version")
             self.connection.executescript(SCHEMA)
-            self.connection.execute("PRAGMA user_version=1")
+            self.connection.execute("PRAGMA user_version=2")
         except Exception:
             self.connection.close()
             raise
@@ -313,29 +328,103 @@ class IncidentStore:
         self.connection.close()
 
     def save_run(self, result: dict) -> str:
+        with self.connection:
+            self.connection.execute("BEGIN IMMEDIATE")
+            return self._insert_run(result)
+
+    def _insert_run(self, result: dict) -> str:
+        """Shared insertion inside the caller's transaction, including A2 job writes."""
         record = minimal_record(result)
         # Hash discarded input too: different private input must not silently share one run ID.
         digest = _hash(_json({key: value for key, value in result.items() if key != "persistence"}))
         project, incident, run = (record[key] for key in ("project_id", "incident_id", "run_id"))
         when = record.get("executed_at") or datetime.now(timezone.utc).isoformat()
         card = _new_card(record)
+        old = self.connection.execute("SELECT content_hash FROM runs WHERE run_id=?", (run,)).fetchone()
+        if old:
+            if old["content_hash"] != digest:
+                raise RunConflict("Run ID already has different contents")
+            return "ALREADY_SAVED"
+        self.connection.execute("""INSERT INTO incidents VALUES (?,?,?,?,?,?)
+            ON CONFLICT(project_id,incident_id) DO UPDATE SET
+            updated_at=excluded.updated_at, latest_run_id=excluded.latest_run_id, latest_revision=excluded.latest_revision
+            WHERE excluded.latest_revision > incidents.latest_revision""", (project, incident, when, when, run, record["revision"]))
+        try:
+            self.connection.execute("INSERT INTO runs VALUES (?,?,?,?,?,?,?,?,?)", (run, project, incident, record["revision"], when, record["route"], record["run_status"], digest, _json(record)))
+        except sqlite3.IntegrityError as exc:
+            raise RunConflict("Incident revision already has a different run") from exc
+        self.connection.execute("INSERT INTO cards VALUES (?,?,?,?,?,?,?)", (run, project, incident, run, "PENDING", _json(record["signals"]), _json(card)))
+        return "SAVED"
+
+    def save_change_result(self, result: dict) -> str:
+        job, run = result["job"], result["run"]
+        for key in ("work_id", "project_id", "incident_id", "source_run_id", "result_run_id"):
+            _id(job[key], key)
+        if (job.get("record_format") != "change_job_v1" or len(_json(job)) > 100_000
+                or job["status"] not in {"CHANGE_PREPARED", "POLICY_REJECTED", "NOT_REPRODUCED", "MODEL_NOT_REQUESTED", "MODEL_FAILED", "VERIFICATION_FAILED", "TIMED_OUT"}
+                or job["review_status"] != "WAITING_REVIEW" or job["original_applied"] is not False
+                or job["deployment_status"] != "NOT_ATTEMPTED" or job["service_recovery"] != "NOT_VERIFIED"
+                or any(run.get(key) is not False for key in ("cause_confirmed", "fix_applied", "fix_verified"))
+                or (run["project_id"], run["incident_id"], run["run_id"]) != (job["project_id"], job["incident_id"], job["result_run_id"])
+                or run.get("change", {}).get("work_id") != job["work_id"]
+                or run["change"].get("candidate_fix_verified") != job["candidate_fix_verified"]):
+            raise ValueError("Invalid A2 change record or completion claim")
+        checks = job["checks"]
+        verified = (job["status"] == "CHANGE_PREPARED" and job.get("original_unchanged") is True and bool(job["diff"].get("sha256"))
+            and len(checks) == 3 and [item["phase"] for item in checks] == ["before", "after", "regression"]
+            and [item["status"] for item in checks] == ["FAILED", "PASSED", "PASSED"]
+            and [item["exit_code"] for item in checks] == [1, 0, 0] and job.get("identical_related_check") is True
+            and [item["command_id"] for item in checks] == ["signup-contract", "signup-contract", "signup-regression"]
+            and checks[0]["argv"] == checks[1]["argv"] and checks[0]["input"] == checks[1]["input"]
+            and checks[0]["execution_settings_sha256"] == checks[1]["execution_settings_sha256"]
+            and checks[0]["result"].get("failure_signature") == "seed-user_id-vs-userId")
+        if job["candidate_fix_verified"] is not verified or (job["status"] == "CHANGE_PREPARED") != verified:
+            raise ValueError("Candidate verification requires before/after/regression evidence")
+        # No source bodies or model proposals in SQLite; only allowlisted job metadata.
+        record = _selected(job, ("record_format", "worker_protocol_version", "worker_code_sha256", "work_id", "project_id", "incident_id", "source_run_id", "result_run_id", "source_revision",
+            "source_record_sha256", "case_kind", "status", "review_status", "candidate_fix_verified", "original_applied", "deployment_status", "service_recovery",
+            "started_at", "finished_at", "elapsed_ms", "policy", "artifact_ref", "baseline", "candidate", "diff", "checks", "attempts", "limitations", "model",
+            "execution", "original_unchanged", "identical_related_check", "error_type"))
+        digest = _hash(_json({"job": job, "run": run}))
         with self.connection:
             self.connection.execute("BEGIN IMMEDIATE")
-            old = self.connection.execute("SELECT content_hash FROM runs WHERE run_id=?", (run,)).fetchone()
+            old = self.connection.execute("SELECT content_hash FROM change_jobs WHERE work_id=?", (job["work_id"],)).fetchone()
             if old:
                 if old["content_hash"] != digest:
-                    raise RunConflict("Run ID already has different contents")
+                    raise RunConflict("Change job already has different contents")
                 return "ALREADY_SAVED"
-            self.connection.execute("""INSERT INTO incidents VALUES (?,?,?,?,?,?)
-                ON CONFLICT(project_id,incident_id) DO UPDATE SET
-                updated_at=excluded.updated_at, latest_run_id=excluded.latest_run_id, latest_revision=excluded.latest_revision
-                WHERE excluded.latest_revision > incidents.latest_revision""", (project, incident, when, when, run, record["revision"]))
+            source = self.get_run(job["project_id"], job["source_run_id"])
+            incident = self.get_incident(job["project_id"], job["incident_id"])
+            if (source["incident_id"] != job["incident_id"] or _hash(_json(source)) != job["source_record_sha256"]
+                    or incident["latest_run_id"] != job["source_run_id"] or run["revision"] != incident["latest_revision"] + 1):
+                raise RunConflict("Source run changed; preserve the obtained result for review")
+            self._insert_run(run)
             try:
-                self.connection.execute("INSERT INTO runs VALUES (?,?,?,?,?,?,?,?,?)", (run, project, incident, record["revision"], when, record["route"], record["run_status"], digest, _json(record)))
+                self.connection.execute("INSERT INTO change_jobs VALUES (?,?,?,?,?,?,?)", (job["work_id"], job["project_id"], job["incident_id"],
+                    job["source_run_id"], job["result_run_id"], digest, _json(record)))
             except sqlite3.IntegrityError as exc:
-                raise RunConflict("Incident revision already has a different run") from exc
-            self.connection.execute("INSERT INTO cards VALUES (?,?,?,?,?,?,?)", (run, project, incident, run, "PENDING", _json(record["signals"]), _json(card)))
+                raise RunConflict("Source run already has a change job") from exc
         return "SAVED"
+
+    def find_change(self, project_id: str, source_run_id: str) -> dict | None:
+        row = self.connection.execute("SELECT record_json FROM change_jobs WHERE project_id=? AND source_run_id=?",
+            (_id(project_id, "project_id"), _id(source_run_id, "source_run_id"))).fetchone()
+        return json.loads(row["record_json"]) if row else None
+
+    def get_change(self, project_id: str, work_id: str) -> dict:
+        row = self.connection.execute("SELECT record_json FROM change_jobs WHERE project_id=? AND work_id=?",
+            (_id(project_id, "project_id"), _id(work_id, "work_id"))).fetchone()
+        if not row:
+            raise ValueError("Change job not found in this project")
+        return json.loads(row["record_json"])
+
+    def list_changes(self, project_id: str, incident_id: str | None = None) -> list[dict]:
+        scope, args = "project_id=?", [_id(project_id, "project_id")]
+        if incident_id is not None:
+            scope += " AND incident_id=?"
+            args.append(_id(incident_id, "incident_id"))
+        rows = self.connection.execute(f"SELECT record_json FROM change_jobs WHERE {scope} ORDER BY rowid DESC LIMIT 50", args)
+        return [json.loads(row["record_json"]) for row in rows]
 
     def get_run(self, project_id: str, run_id: str) -> dict:
         row = self.connection.execute("SELECT record_json FROM runs WHERE project_id=? AND run_id=?", (_id(project_id, "project_id"), _id(run_id, "run_id"))).fetchone()
@@ -357,7 +446,9 @@ class IncidentStore:
         if not row:
             raise ValueError("Incident not found in this project")
         runs = [dict(item) for item in self.connection.execute("SELECT run_id,revision,executed_at,route,run_status FROM runs WHERE project_id=? AND incident_id=? ORDER BY revision", (project_id, incident_id))]
-        return {**dict(row), "runs": runs}
+        changes = [{key: item[key] for key in ("work_id", "source_run_id", "result_run_id", "status", "review_status", "candidate_fix_verified")}
+                   for item in self.list_changes(project_id, incident_id)]
+        return {**dict(row), "runs": runs, "changes": changes}
 
     def resume_result(self, project_id: str, incident_id: str) -> dict:
         incident = self.get_incident(project_id, incident_id)

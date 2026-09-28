@@ -8,7 +8,9 @@ import sys
 
 from dotenv import load_dotenv
 
-from tracebridge.report_agent import follow_up_submission, investigate_submission
+from tracebridge.report_agent import confirm_candidate, investigate_submission
+from tracebridge.report_service import follow_up_service as follow_up_submission, prepare_submission
+from tracebridge.seed_project import capture_seed_action
 from tracebridge.report_contract import ReportContext
 from tracebridge.report_intake import LocalEventCatalog
 from tracebridge.incident_memory import IncidentStore
@@ -36,6 +38,10 @@ def main() -> None:
     parser.add_argument("--max-seconds", type=float, default=90, help="Bounded investigation time (1..180 seconds)")
     parser.add_argument("--docker-logs", action="store_true", help="Allow selected local Docker log collection")
     parser.add_argument("--live", action="store_true", help="Send the image and selected redacted text/code/logs to NVIDIA services")
+    parser.add_argument("--registered-seed", action="store_true", help="Use the registered local seed project instead of Agolive")
+    parser.add_argument("--capture-seed-action", action="store_true", help="Execute the fixed seed signup check and capture its current observation")
+    parser.add_argument("--confirm-candidate", help="Explicitly select one candidate offered by the current stored run")
+    parser.add_argument("--prepare-change", action="store_true", help="Prepare the saved registered work candidate; --live enables the actual proposal")
     parser.add_argument("--output", type=Path, help="Write the redacted investigation record as JSON")
     args = parser.parse_args()
     try:
@@ -48,16 +54,25 @@ def main() -> None:
         context = ReportContext(environment=args.environment, service=args.service, occurred_at=args.occurred_at, trace_id=args.trace_id, operation=args.operation)
         options = dict(repo=args.repo, log_file=args.logs_file, catalog=catalog,
             include_docker_logs=args.docker_logs, use_nvidia=args.live,
-            since_minutes=args.since_minutes, max_seconds=args.max_seconds, db_path=args.db)
+            since_minutes=args.since_minutes, max_seconds=args.max_seconds, db_path=args.db,
+            registered_seed=args.registered_seed)
+        if args.capture_seed_action:
+            if not args.registered_seed:
+                parser.error("--capture-seed-action requires --registered-seed")
+            capture_seed_action()
         if args.resume:
             if not args.answer or args.report or image:
                 parser.error("--resume requires --answer; use --report/--image for a new incident")
             with IncidentStore(args.db) as store:
-                result = store.resume_result(args.project or (catalog.project_id if catalog else "agolive"), args.resume)
+                result = store.resume_result(args.project or ("tracebridge-seed-signup" if args.registered_seed else catalog.project_id if catalog else "agolive"), args.resume)
         else:
             result = investigate_submission(args.report, image=image, context=context, **options)
         for answer in args.answer:
             result = follow_up_submission(result, answer, context=context, **options)
+        if args.confirm_candidate:
+            result = confirm_candidate(result, args.confirm_candidate, **options)
+        if args.prepare_change:
+            result = {"investigation": result, "change": prepare_submission(result, db_path=args.db, live=args.live)}
     except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
         parser.error(str(exc))
     serialized = json.dumps(result, ensure_ascii=False, indent=2)

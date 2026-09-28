@@ -83,6 +83,8 @@ $r = .\.venv\Scripts\python.exe -m scripts.investigate_report --db $db --repo te
 
 동일 프로젝트·저장소·사건 파일/등록 로그 경로·등록 범위·Docker 선택을 다시 전달해야 한다. 저장된 `source_binding` 해시로 검사한다. 원문 대신 명시 ID/오류/경로 등 구조화 단서, 접수 시각·선택 범위·사진 해시·답변 횟수를 복원한다. 원래 자유문과 사진/OCR 본문은 복원하지 않아 새 답변으로 보완할 수 있다. 후속 답변은 누적 6회 한도를 유지한다. 저장된 사진 단서는 `origin_run_id`와 해시를 보존하며 생략한 OCR 본문을 현재 근거로 재구성하지 않는다.
 
+최초 접수 시각인 `session.received_at`과 각 실행의 `message_received_at`을 구분한다. 후속 답변의 `오늘·어제`는 그 답변의 접수 시각을 KST로 변환한 날짜를 기준으로 한다. `relative_date_basis={date, timezone}`는 상대 날짜의 기준이며, 명시 날짜/ISO 입력은 그대로 우선한다. 아래 날짜 보완 기록에 재현 결과와 제약을 남겼다.
+
 화면의 개발자 기록에서 SQLite 저장 상태·실행 ID·검색/현재 재확인을 본다. 저장 실패 시 이미 확보한 결과를 유지하고 **이 결과 저장만 재시도** 버튼으로 저장만 다시 한다. 실패를 조사 `run_status`와 섞거나 모델·도구를 다시 실행하지 않는다. CLI에서는 원 실행의 명시적 JSON 내보내기가 있으면 아래처럼 저장만 재시도한다.
 
 ```powershell
@@ -101,7 +103,7 @@ $r = .\.venv\Scripts\python.exe -m scripts.investigate_report --db $db --repo te
 git diff --check
 ```
 
-전체 **157개(기존 127 + 신규 30)**가 정상 권한에서 통과했다. 기존 회귀 기대값을 바꾸지 않았다. 제한 Windows 실행의 임시 폴더 접근 오류는 정상 권한 실행으로 확인했으며 기능 실패로 집계하지 않는다. 정식 회귀 범위는 `tests/`이고 `generated/`의 수정 전 재현 산출물은 수정하거나 정식 검사로 집계하지 않았다.
+사건 기억의 초기 기준은 **157개(기존 127 + 신규 30)** 통과였다. 후속 상대 날짜 보완으로 가짜 시계 검사 13개를 추가한 **전체 170개가 정상 권한에서 통과**했다(29.31초). 기존 회귀 기대값을 바꾸지 않았다. 제한 Windows 실행의 임시 폴더 접근 오류는 정상 권한 실행으로 확인했으며 기능 실패로 집계하지 않는다. 정식 회귀 범위는 `tests/`이고 `generated/`의 수정 전 재현 산출물은 수정하거나 정식 검사로 집계하지 않았다.
 
 신규 검사는 재연결/이전 실행, 동일 실행 및 revision 충돌, 승인·수정·반려/FTS 갱신, 프로젝트 격리/2건 상한, 정확/스택/빈 입력/특수문자 검색, 요청값·원문 제외, 저장/검색 실패와 저장만 재시도, 자료 연결·답변 한도, 사진 단서 재연결과 추가 사진의 ID 구분, 과거 카드의 지시문·근거 ID 차단, 반복 제보와 다른 현재 원인을 검사한다. 같은 HTTP 500에서도 과거 `SQLiteException`과 현재 `IllegalStateException`을 구분해 과거 가설을 기각했고, 과거/현재에 모두 `L1`이 있어도 실행이 붙은 과거 참조는 현재 가설 지지에서 제외했다. 이 모델 경계 검사는 가짜 클라이언트이며 외부 모델 호출이 아니다.
 
@@ -114,6 +116,34 @@ git diff --check
 | 현재 422/500 충돌 | 같은 카드 1건, EXACT | 현재 로그 2개 보존, `NOT_REVALIDATED`, `REQUEST_CONTEXT/WAITING_CONTEXT`, 단일 응답 미확정 | 4.327ms |
 
 DB 재연결 뒤 처음/후속 실행 2개와 revision 2를 확인했고 재저장은 `ALREADY_SAVED`였다. 위 실행은 모두 저장됐고 원인·수정 검증 false, 새 외부 모델 호출 0회였다. 현재 실행 버전은 `NOT_OBSERVED`로 유지했다. 실제 로그/배포/실사건 검증 완료, 조사 시간·도구 호출 절감, 범용 의미 검색의 증거로 사용하지 않는다.
+
+## 재시작/후속 답변의 상대 날짜 보완
+
+원인은 `report_agent.py`의 후속 `with_answer`에도 최초 `session.received_at`을 전달한 것이었다. SQLite는 이 최초 시각을 보존하므로, 다음 날 답변한 `오늘`이 최초 제보 날짜로 해석됐다. 수정 전 가짜 시계 검사에서 `claim-003`과 `contract-001`의 9/29 답변이 9/28 10:00으로 남는 실패 2개를 재현했다.
+
+조사 함수 진입에서 현재 메시지의 UTC 시각을 한 번 캡처해 `with_answer`에 전달한다. 최초 접수는 이 시각을 `session.received_at`으로 설정하고, 후속 답변에서는 기존 최초 시각을 유지한다. 실행별 `message_received_at`과 `relative_date_basis={date, timezone: "+09:00"}`를 결과·이력·SQLite 최소 JSON에 추가했다. 기준 메타데이터는 상대 날짜를 해석할 때 사용하는 날짜이며 실제 조회할 발생 시각은 `session.context.occurred_at/log_scope.requested.occurred_at`이다. 명시 날짜와 ISO 입력에는 기존 우선순위를 유지한다.
+
+자료 준비 중 자정을 넘어도 함수 진입 당시 메시지 날짜를 사용한다. 날짜가 바뀌면 기존 요청/로그 범위 검사로 현재 날짜를 다시 조회하고 이전 날짜 자료를 제외한다. 원 사건의 접수 시각·이전 실행을 다시 쓰지 않으며 자료 연결 해시·6회 답변 한도도 유지한다. 새 테이블/마이그레이션/실행 프레임워크나 원문 답변·사진 보관을 추가하지 않았다. 기존 저장 실행에 새 메타데이터가 없어도 다음 실행에서 현재 메시지 시각을 새로 캡처하며 이전 행은 그대로 둔다.
+
+가짜 UTC 시각을 9/28 01:05 → 9/29 01:05(KST 각각 10:05)로 바꾼 단독 `claim-003` 재현:
+
+| 메시지 | 상대 날짜 기준(KST) | 조회 발생 시각 | 실제 판정·현재 로그 |
+| --- | --- | --- | --- |
+| 최초 9/28 접수 | 2026-09-28 | `2026-09-28T10:00:00+09:00` | `GUIDANCE/COMPLETED`, HTTP 422, 로그 1개 일치 |
+| 9/29 DB 복원 후 오늘 오전 10시 | 2026-09-29 | `2026-09-29T10:00:00+09:00` | `REQUEST_CONTEXT/WAITING_CONTEXT`, 응답 미확정, 기존 날짜 로그 1개 제외 |
+| 같은 날 어제 오전 10시 | 2026-09-29 | `2026-09-28T10:00:00+09:00` | 현재 범위로 다시 조회해 `GUIDANCE/COMPLETED`, HTTP 422, 로그 1개 일치 |
+
+세 실행 모두 최초 `session.received_at=2026-09-28T01:05:00+00:00`을 보존했다. 별도 새 실행 3개를 저장했고 최초 실행 조회 내용이 동일함을 확인했다. 원문 답변 대신 위 최소 시각·기준 정보만 추가했다. 기록은 `output/validation/message-date-replay-f1a8896b/replay.json`과 같은 폴더 DB에 있으며 모두 합성 자료다.
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider tests/test_message_dates.py
+.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider tests
+git diff --check
+```
+
+신규 13개는 같은 날 오늘, 다음 날 복원 후 오늘의 안내/작업 후보 보류, 다음 날 어제, 같은 세션의 자정, 명시 한국어 날짜/ISO/UTC 시각, UTC 14:59/15:01의 KST 날짜 경계, 준비 중 자정, 최초 시각·이전 실행·자료 연결·답변 횟수를 검사했다. 가짜 시계만 사용했으며 실제 대기와 외부 모델 호출은 0회다. 지원 범위는 기존의 간단한 한국어 날짜·시각 패턴과 timezone이 있는 ISO 시각이며 상대 날짜는 KST 고정이다. 시간 없는 상대 표현·다른 시간대/자유로운 자연어 해석은 확장하지 않았다.
+
+이번 국소 보완의 변경은 `tracebridge/report_agent.py`, `tracebridge/report_contract.py`, `tracebridge/incident_memory.py`, `tests/test_message_dates.py`, `docs/current-state.md`, `docs/stage-3-memory.md`에 한정했다. 격리 수정 작업자와 비교 평가 단계는 시작하지 않았다.
 
 ## 이번 변경 파일
 

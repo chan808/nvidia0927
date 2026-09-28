@@ -12,6 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 TOP_LEVEL = [
     ".env.example",
     ".gitignore",
+    ".gitattributes",
+    ".streamlit/config.toml",
     "README.md",
     "DESIGN.md",
     "SUBMISSION_DRAFT.md",

@@ -1,0 +1,155 @@
+[
+  {
+    "case": "complete_short_log",
+    "bytes": 971,
+    "route": "REQUEST_CONTEXT",
+    "observed_status": null,
+    "claim_status": "UNVERIFIABLE",
+    "run_status": "WAITING_CONTEXT",
+    "model_calls": 0,
+    "aggregate": {
+      "observation_count": 2,
+      "observation_limit": 100,
+      "complete": true,
+      "conflicting_trace_ids": [
+        "intake-guidance"
+      ],
+      "conflicts": [
+        {
+          "trace_id": "intake-guidance",
+          "fields": [
+            "response_status"
+          ],
+          "sources": [
+            "local_event_catalog",
+            "registered-log"
+          ]
+        }
+      ]
+    },
+    "sources": [
+      {
+        "source": "registered-log",
+        "requested": {
+          "environment": "dev",
+          "service": "backend",
+          "occurred_at": "2026-09-28T10:00:00+09:00",
+          "trace_id": null,
+          "method": null,
+          "path": null,
+          "operation": null
+        },
+        "registration": {
+          "environment": "dev",
+          "service": "backend",
+          "timezone": "+09:00",
+          "project_id": "agolive"
+        },
+        "counts": {
+          "matched": 2,
+          "unverified": 0,
+          "excluded": 0
+        },
+        "event_limit_reached": false,
+        "deadline_exhausted": false
+      }
+    ],
+    "notes": [
+      "SUPPORTED_HYPOTHESIS도 원인 확정·재현 성공·수정 검증을 뜻하지 않습니다"
+    ]
+  },
+  {
+    "case": "byte_truncated_log",
+    "bytes": 480971,
+    "route": "GUIDANCE",
+    "observed_status": 422,
+    "claim_status": "CONTRADICTED",
+    "run_status": "COMPLETED",
+    "model_calls": 0,
+    "aggregate": {
+      "observation_count": 1,
+      "observation_limit": 100,
+      "complete": true,
+      "conflicting_trace_ids": [],
+      "conflicts": []
+    },
+    "sources": [
+      {
+        "source": "registered-log",
+        "requested": {
+          "environment": "dev",
+          "service": "backend",
+          "occurred_at": "2026-09-28T10:00:00+09:00",
+          "trace_id": null,
+          "method": null,
+          "path": null,
+          "operation": null
+        },
+        "registration": {
+          "environment": "dev",
+          "service": "backend",
+          "timezone": "+09:00",
+          "project_id": "agolive"
+        },
+        "counts": {
+          "matched": 1,
+          "unverified": 0,
+          "excluded": 4999
+        },
+        "event_limit_reached": false,
+        "deadline_exhausted": false
+      }
+    ],
+    "notes": [
+      "범위 또는 요청 식별 값이 다른 로그를 이번 사건의 근거에서 제외했습니다",
+      "SUPPORTED_HYPOTHESIS도 원인 확정·재현 성공·수정 검증을 뜻하지 않습니다"
+    ]
+  },
+  {
+    "case": "line_truncated_log",
+    "bytes": 18971,
+    "route": "GUIDANCE",
+    "observed_status": 422,
+    "claim_status": "CONTRADICTED",
+    "run_status": "COMPLETED",
+    "model_calls": 0,
+    "aggregate": {
+      "observation_count": 1,
+      "observation_limit": 100,
+      "complete": true,
+      "conflicting_trace_ids": [],
+      "conflicts": []
+    },
+    "sources": [
+      {
+        "source": "registered-log",
+        "requested": {
+          "environment": "dev",
+          "service": "backend",
+          "occurred_at": "2026-09-28T10:00:00+09:00",
+          "trace_id": null,
+          "method": null,
+          "path": null,
+          "operation": null
+        },
+        "registration": {
+          "environment": "dev",
+          "service": "backend",
+          "timezone": "+09:00",
+          "project_id": "agolive"
+        },
+        "counts": {
+          "matched": 1,
+          "unverified": 0,
+          "excluded": 4999
+        },
+        "event_limit_reached": false,
+        "deadline_exhausted": false
+      }
+    ],
+    "notes": [
+      "범위 또는 요청 식별 값이 다른 로그를 이번 사건의 근거에서 제외했습니다",
+      "SUPPORTED_HYPOTHESIS도 원인 확정·재현 성공·수정 검증을 뜻하지 않습니다"
+    ]
+  }
+]

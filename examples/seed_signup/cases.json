@@ -1,0 +1,10 @@
+{
+  "case_kind": "SEEDED_DEVELOPMENT",
+  "input_id": "signup-cases-v1",
+  "happy": {"user_id": "seed-alpha", "display_name": "Seed Alpha"},
+  "regression": [
+    {"user_id": "seed-alpha", "display_name": "Seed Alpha"},
+    {"user_id": "seed-beta", "display_name": "Seed Beta"},
+    {"user_id": "", "display_name": "Empty ID"}
+  ]
+}

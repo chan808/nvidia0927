@@ -33,6 +33,19 @@ def _one_report_value(pattern: re.Pattern[str], report: str) -> str | None:
     return values[0] if len(values) == 1 else None
 
 
+def mentioned_operations(report: str, operations: set[str | None]) -> list[str]:
+    """Match registered action names and a few ordinary phrases, never invent IDs."""
+    compact = re.sub(r"\s+", "", report)
+    aliases = {
+        "회원가입": r"회원\s*가입|계정(?:을)?\s*(?:생성|만들)|(?<![가-힣])가입(?=\s|[이가을은도하]|버튼|화면|$)",
+        "방입장": r"방\s*입장|방에\s*(?:들어|입장)|입장\s*버튼",
+    }
+    return [name for name in sorted(value for value in operations if value)
+            if re.sub(r"\s+", "", name) in compact
+            or any(action in re.sub(r"\s+", "", name) and re.search(pattern, report)
+                   for action, pattern in aliases.items())]
+
+
 def _known_value_conflict(left: Any, right: Any) -> bool:
     markers = {"[VALUE]", "[REDACTED]", "[MASKED]", "[API_KEY]", "[EMAIL]", "[IP]"}
     if any(value is None or isinstance(value, str) and value.upper() in markers for value in (left, right)):
@@ -275,7 +288,7 @@ def triage_report(
         selected_method = method or _one_report_value(METHOD_PATTERN, report)
         selected_path = path or _one_report_value(PATH_PATTERN, report)
         known_operations = {s.get_trace(id_).get("operation") for id_, (s, _) in catalog.events.items()}
-        mentioned = [name for name in known_operations if name and name in report]
+        mentioned = mentioned_operations(report, known_operations)
         selected_operation = operation or (mentioned[0] if len(mentioned) == 1 else None)
         if not all((environment, when)) or not (service or selected_operation or selected_method and selected_path):
             return needs_context("어떤 화면에서 무엇을 하려던 중이었고, 대략 언제 발생했나요?")

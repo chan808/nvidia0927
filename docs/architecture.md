@@ -31,7 +31,7 @@ flowchart TB
 
 ## 빠른 경로와 에이전트 경로
 
-현재 로컬 구현은 [report_contract.py](../tracebridge/report_contract.py)의 입력/결과를 [report_intake.py](../tracebridge/report_intake.py)와 [report_agent.py](../tracebridge/report_agent.py)가 공유한다. `triage.analyze/route_verdict`가 공통 판정·라우팅을 수행하고 등록 파일/선택 Docker는 조회 전에 범위를 검사한다. [incident_memory.py](../tracebridge/incident_memory.py)가 사건·실행·카드 3개 테이블과 FTS5로 최소 기록/검토/검색을 연결한다. 현재 소스를 읽은 뒤 최대 2개 과거 카드를 별도 단서로 제공하고 기존 근거·도구·라우팅 경계를 유지한다. 검색/저장 실패는 조사 결과와 별도로 표시하며 저장만 재시도한다. 내부용 CLI 재시작 답변은 자료 연결 해시와 답변 한도를 검사한다. 새 서버·작업 큐·다중 조직 인증·수정 작업자는 없다. [3단계 실제 구현 범위](stage-3-memory.md)와 [2단계 실자료 게이트](stage-2-integration.md)를 구분한다.
+현재 로컬 구현은 [report_contract.py](../tracebridge/report_contract.py)의 입력/결과를 [report_intake.py](../tracebridge/report_intake.py)와 [report_agent.py](../tracebridge/report_agent.py)가 공유한다. `triage.analyze/route_verdict`가 공통 판정·라우팅을 수행하고 등록 파일/선택 Docker는 조회 전에 범위를 검사한다. [incident_memory.py](../tracebridge/incident_memory.py)가 사건·실행·카드와 FTS5로 최소 기록/검토/검색을 연결하며 4단계에서 최소 `change_jobs` 테이블 1개를 추가했다. 현재 소스를 읽은 뒤 최대 2개 과거 카드를 별도 단서로 제공하고 기존 근거·도구·라우팅 경계를 유지한다. 검색/저장 실패는 조사 결과와 별도로 표시하며 저장만 재시도한다. 내부용 CLI 재시작 답변은 자료 연결 해시와 답변 한도를 검사한다. [작은 A2 작업자](../tracebridge/change_worker.py)는 등록된 씨드 1개의 검증된 키 리터럴 변경만 별도 사본에서 실행한다. 새 서버·작업 큐·다중 조직 인증·범용 수정 작업자는 없다. [4단계 보장 범위](stage-4-change.md), [3단계 기록](stage-3-memory.md), [2단계 실자료 게이트](stage-2-integration.md)를 구분한다.
 
 1. `Intake`가 크기·형식·중복·남용을 검사하고 원문을 보존한다.
 2. `Correlator`가 ID 정확 일치, 시간/환경/경로 제한 검색, 기존 사건과의 중복을 처리한다. 명시된 HTTP 사실과 계약의 단순 비교는 규칙 코드가 수행한다.

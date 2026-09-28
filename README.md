@@ -4,7 +4,9 @@ API 오류 제보나 제보 없는 백엔드 사건을 조사하는 도구입니
 
 **목표 서비스와 현재 데모를 구분해 읽으려면 [문서 지도](docs/README.md)부터 보세요.** 제품·사건 흐름·권한·자동 해결 정책·NVIDIA 대회 조건·구축 단계는 `docs/`에 나눠 정리했습니다. 이 README는 지금 실행 가능한 범위를 설명합니다.
 
-2026-09-28 [접수·판정 통합](docs/stage-2-integration.md)과 [SQLite 사건 기억](docs/stage-3-memory.md)을 연결했습니다. 새 화면/CLI의 접수·후속 답변 결과를 저장하고 재시작 후 조회·답변하며 검토된 카드만 다음 제보의 과거 조사 단서로 검색합니다. 기존 127개와 신규 30개 검사가 통과했습니다. 실제 Agolive 로그·배포 연결과 실사건 검증은 자료 확보 대기이며 수정 작업자·비교 평가·제출 단계는 시작하지 않았습니다.
+**최신 점검: [최종 단계 전 서비스 점검](docs/pre-final-readiness.md).** 첫 화면에서 짧은 제보·사진, 현재 개발 관측, 후보 확인, 실제 수정안 준비, 검사, SQLite 기록·검토·후속 답변을 연결했습니다. 등록 씨드 한 건의 실제 화면 실행은 성공했습니다. 일반 모델 조사 안정성과 실제 Agolive 사건 검증은 남아 있습니다. 단순 프롬프트 대비 판단·속도 우위는 입증하지 않았습니다.
+
+2026-09-28 [접수·판정 통합](docs/stage-2-integration.md), [SQLite 사건 기억](docs/stage-3-memory.md), [한 가지 격리 수정·검증](docs/stage-4-change.md)을 연결했습니다. 기존 날짜 보완의 170개 기준 검사를 재확인했고, 등록한 씨드 개발 프로젝트에서 실제 Nemotron 제안으로 후보 파일을 바꿔 같은 검사와 회귀를 통과했습니다. 원본을 보존한 `CHANGE_PREPARED/WAITING_REVIEW`입니다. 실제 Agolive 로그·배포 연결과 실사건 검증은 자료 확보 대기이며 비교 평가·제출 단계는 시작하지 않았습니다.
 
 ## 동작 방식
 
@@ -37,7 +39,7 @@ if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 .\.venv\Scripts\python.exe -m streamlit run app.py
 ```
 
-`http://localhost:8501`에서 사례를 선택하고 **증거 조사 시작 → 재현 테스트 생성·실행** 순서로 확인합니다. CLI에서도 실행할 수 있습니다.
+`http://localhost:8501`의 첫 화면은 **제보 · 조사 · 수정안**입니다. 개발 가입 사례에서 **개발 가입 동작 실행 → '방금 가입이 안 돼요. 고쳐줘.' 접수 → 이 동작이 맞아요**로 현재 관측을 확인합니다. 외부 분석·자동 준비를 선택하면 허용된 수정안과 동일 검사가 같은 사건에 연결됩니다. 이전 화면은 **기존 합성 자료 데모** 페이지에 보존했습니다. CLI에서도 실행할 수 있습니다.
 
 ```powershell
 .\.venv\Scripts\python.exe -m scripts.demo_cli contract-001 --repro
@@ -99,6 +101,19 @@ $db = $demo.database
 
 `scripts.investigate_report --resume <incident_id> --answer '새 답변'`은 저장 당시와 같은 현재 자료 연결 옵션을 사용해 같은 사건의 새 실행을 만듭니다. 원문은 복원하지 않고 명시 ID/오류/경로·선택 범위·답변 횟수를 복원합니다. 화면에서 저장 실패를 표시하며 저장만 재시도할 수 있습니다. CLI의 원 실행 JSON은 `scripts.incident_memory save --file ...`로 저장만 재시도합니다. [실행 가능한 전체 명령과 측정 결과](docs/stage-3-memory.md)를 참조하세요. 현재 기능은 OS/파일 접근 권한을 가진 담당자의 로컬 내부용이며 project 필터는 공개 서비스 인증·인가가 아닙니다.
 
+## 격리 수정 준비 (등록 씨드 A2)
+
+통제된 `SEEDED_DEVELOPMENT` 프로젝트의 요청 필드 오류 한 가지를 대상으로 합니다. 등록 정책을 통과한 저장 실행에서 원본의 별도 사본을 만들고, 수정 전 실패를 확인한 뒤 기존 NVIDIA 연결의 구조화 제안을 검증해 사전 키 문자열만 바꿉니다. 검사 파일·실행 명령·환경 설정은 모델이 바꿀 수 없습니다. OS/OpenShell 격리를 확보하지 않았으므로 등록된 신뢰 가능한 씨드 코드만 실행합니다.
+
+```powershell
+$stage4Db = 'output/validation/stage4-local/state.sqlite3'
+$source = .\.venv\Scripts\python.exe -m scripts.prepare_change --db $stage4Db seed | ConvertFrom-Json
+$prepared = .\.venv\Scripts\python.exe -m scripts.prepare_change --db $stage4Db prepare --source-run $source.run_id --live | ConvertFrom-Json
+.\.venv\Scripts\python.exe -m scripts.prepare_change --db $stage4Db show $prepared.job.work_id
+```
+
+`--live`는 등록 합성 코드·입력·실패의 Nemotron 전송을 선택합니다. 생략하면 수정 전 재현과 모델 미요청 상태만 남깁니다. 원본 적용·배포·서비스 회복은 수행하지 않으며 새 카드는 PENDING입니다. 실패 기록·실제 모델 호출 2회의 구분, 원본/후보 해시, 검토·저장만 재시도와 전체 명령은 [4단계 기록](docs/stage-4-change.md)에 있습니다. 내부 CLI이며 제보자에게 실행 경로/명령 ID를 요구하지 않습니다.
+
 ## 테스트와 범위
 
 ```powershell
@@ -107,7 +122,7 @@ $db = $demo.database
 git diff --check
 ```
 
-정식 회귀 범위는 `tests/`이며 **157개(기존 127+신규 30)**가 통과했습니다. `generated/`의 수정 전 재현 산출물은 별도입니다. 검색 적중·시간·현재 재확인을 기록하지만 응답 시간·도구 호출 절감이나 실사건 검증 완료는 주장하지 않습니다.
+정식 회귀 범위는 `tests/`이며 **전체 227개(기존 170+신규 57)**가 통과했습니다. 4단계 정책·후보 편집·실패·저장/검토 검사를 추가했습니다. `generated/`의 수정 전 샘플 산출물은 별도입니다. 최신 전체 결과는 [4단계 기록](docs/stage-4-change.md)에 있습니다. 응답 시간·도구 호출 절감이나 실사건 검증 완료는 주장하지 않습니다.
 
 기존 NVIDIA 화면의 입력 자료는 **합성 사례 3개**입니다. 로컬 JSON 경로는 단일 요청의 일부 관측 자료만 받습니다. Agolive 연결은 로컬 코드와 선택 로그를 검색하지만 운영 로그·배포 버전을 자동 수집하거나 프로젝트를 수정하지 않습니다. 코드만 찾은 결과는 원인 확정 근거가 아닙니다. 수정 전 실패와 후보 수정 후 통과는 샘플 앱·격리 DB에만 해당하며 실제 서비스가 수정됐다는 뜻은 아닙니다. 모델이 작성한 임의 코드는 실행하지 않습니다.
 

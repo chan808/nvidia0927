@@ -1,0 +1,50 @@
+{
+  "policy_id": "seed-signup-a2-v1",
+  "version": 1,
+  "authorization": "A2 PREPARE_CHANGE",
+  "project_id": "tracebridge-seed-signup",
+  "target_id": "seed-signup-client",
+  "case_kind": "SEEDED_DEVELOPMENT",
+  "source_root": "examples/seed_signup",
+  "source_origin": "Workspace-controlled seed fixture; user-authorized A2 development/test only",
+  "baseline_version": "seed-signup-v1",
+  "files": {
+    "client.py": "0ea85e39cd33018c7bb32dd95ab85dd123bec11392fc495110e31a0835bca6ec",
+    "api.py": "a0685dd7b0867f6e384f2f2ab971642c8061fe0b49ec3ccf1520afab1d270d62",
+    "checks.py": "e592b8be573c1d50f08b096db8eac1fb58dc3fb01c234ae6e69a8a66d10cfef3",
+    "cases.json": "301d837e358e9b0cf79cd1c0b834e414af5f9372e8aa5933f9b5f535cdd6d6dc",
+    "events.json": "933fdf9ec4c7daacd1f74f9d00210d1b042d2f29cb0c06c8ae8de464ccd27212",
+    "README.md": "d074a7d391dc12ab0ef5a92f45b134aae710548e632cef9bc790ddfbbf1634cb"
+  },
+  "snapshot_sha256": "3c11e6e23eec7ab7a91fd4322f68e055b20493b91323e5ff605644a5916c0e4e",
+  "editable_paths": [
+    "client.py"
+  ],
+  "editable_function": "build_signup_request",
+  "editable_key_indices": [
+    0,
+    1
+  ],
+  "max_files": 1,
+  "max_edits": 2,
+  "max_changed_lines": 6,
+  "max_changed_bytes": 256,
+  "max_diff_bytes": 4096,
+  "check_ids": [
+    "signup-contract",
+    "signup-regression"
+  ],
+  "check_timeout_seconds": 10,
+  "model_timeout_seconds": 45,
+  "total_seconds": 90,
+  "max_attempts": 1,
+  "environment": {
+    "environment": "dev",
+    "service": "seed-api",
+    "method": "POST",
+    "path": "/api/users"
+  },
+  "execution_mode": "TRUSTED_SEED_RESTRICTED_LITERALS",
+  "external_model_data": "REGISTERED_SYNTHETIC_ONLY",
+  "failure_signature": "seed-user_id-vs-userId"
+}

@@ -1,0 +1,2 @@
+examples/seed_signup/* text eol=lf
+examples/change_policy/*.json text eol=lf

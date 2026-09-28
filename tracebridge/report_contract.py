@@ -47,12 +47,12 @@ class ReportContext:
         return asdict(self)
 
     def with_answer(self, answer: str, *, received_at: str | None = None) -> ReportContext:
-        """Understand a few ordinary Korean time/environment answers, without a model."""
+        """Parse simple context; received_at is this message's receipt, not the incident's."""
         changes = {}
         for pattern, value in ((r"개발(?:\s*환경)?|\bdev\b", "dev"), (r"스테이징|\bstaging\b", "staging"), (r"운영(?:\s*환경)?|\bprod\b", "prod")):
             if re.search(pattern, answer, re.I):
                 changes["environment"] = value
-        iso = re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})", answer)
+        iso = re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})", answer)
         if iso:
             changes["occurred_at"] = event_time(iso.group()).isoformat()
         else:
@@ -70,6 +70,9 @@ class ReportContext:
                         raise ValueError("오전·오후 시각을 확인해 주세요")
                     hour = hour % 12 + (12 if clock.group(1) == "오후" else 0)
                 changes["occurred_at"] = day.replace(hour=hour, minute=int(clock.group(3) or clock.group(4) or 0)).isoformat()
+            elif re.search(r"방금|조금\s*전", answer) and not date:
+                base = event_time(received_at).astimezone(KST) if received_at else datetime.now(KST)
+                changes["occurred_at"] = base.isoformat()
         return replace(self, **changes)
 
 
@@ -77,11 +80,21 @@ def plain_questions(*, photo_only: bool = False) -> list[str]:
     return (["어떤 화면에서 무엇을 하려던 중이었나요?"] if not photo_only else ["사진에서 어떤 문제가 보이나요? 하려던 동작을 알려주세요."]) + ["대략 언제였고, 화면에 어떤 오류 문구가 나왔나요?"]
 
 
+def action_preference(answer: str) -> str | None:
+    """Explicit user restrictions survive restart without retaining the user's text."""
+    if re.search(r"조사\s*만|확인\s*만|수정(?:하|해)?지\s*마|고치지\s*마|do not (?:edit|fix)|read.only", answer, re.I):
+        return "INVESTIGATE_ONLY"
+    if re.search(r"고쳐|고치|수정해|수정\s*부탁|해결해|해결\s*부탁", answer):
+        return "PREPARE_ALLOWED"
+    return None
+
+
 def empty_result(project_id: str, *, incident_id: str | None = None) -> dict:
     return {
         "contract_version": 1, "project_id": project_id,
         "incident_id": incident_id or uuid4().hex, "run_id": uuid4().hex,
         "revision": 1,
+        "message_received_at": None, "relative_date_basis": {},
         "correlation": "NEEDS_CONTEXT", "correlation_basis": None,
         "trace_id": None, "candidate_trace_ids": [], "candidates": [],
         "route": "REQUEST_CONTEXT", "route_reason": "제보와 실제 요청의 연결을 더 확인해야 합니다",

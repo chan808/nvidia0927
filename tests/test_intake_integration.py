@@ -344,7 +344,7 @@ def test_page_investigates_a_scoped_server_error(monkeypatch):
     page = AppTest.from_file(str(ROOT / "pages" / "2_Report_Agent.py")).run()
     page.text_area[0].set_value("주문에서 500 requestId=intake-server")
     page.text_input[0].set_value("2026-09-28 오전 10시 20분")
-    page.selectbox[0].set_value("개발 환경")
+    page.selectbox(key="report_environment").set_value("개발 환경")
     page.button[0].click().run()
     result = page.session_state["report_agent_result"]
     assert not page.exception and result["route"] == "INVESTIGATE"

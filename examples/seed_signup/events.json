@@ -1,0 +1,23 @@
+{
+  "case_kind": "SEEDED_DEVELOPMENT",
+  "project_id": "tracebridge-seed-signup",
+  "events": [
+    {
+      "trace": {
+        "trace_id": "seed-signup-001",
+        "occurred_at": "2026-09-28T10:00:00+09:00",
+        "environment": "dev",
+        "service": "seed-api",
+        "operation": "씨드 회원가입",
+        "method": "POST",
+        "path": "/api/users",
+        "version": "seed-signup-v1",
+        "request": {"user_id": "seed-alpha", "displayName": "Seed Alpha"},
+        "response_status": 422
+      },
+      "contract": {"required": ["userId"], "properties": {"userId": "string", "displayName": "string"}},
+      "dto": {"userId": "str", "displayName": "str"},
+      "logs": ["SEEDED_DEVELOPMENT: userId is required; caller sends user_id"]
+    }
+  ]
+}

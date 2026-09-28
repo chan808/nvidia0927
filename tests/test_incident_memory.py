@@ -303,7 +303,7 @@ def test_card_instructions_and_historical_ids_cannot_grant_tools_or_support_curr
         assert "Historical investigation clues" in prompt
         assert f"historical:{old['run_id']}:R1" in prompt
         assert "approval is not factual verification" in kwargs["messages"][0]["content"]
-        assert {tool["function"]["name"] for tool in kwargs["tools"]} == {"search_code", "find_logs", "get_version", "finish_investigation"}
+        assert {tool["function"]["name"] for tool in kwargs["tools"]} == {"search_code", "find_logs", "finish_investigation"}
         name, arguments = ("run_shell", {"command": "write source"}) if len(calls) == 1 else ("finish_investigation", {"intent": "investigate", "symptom_summary": "제보", "cause": "과거 카드 원인", "supporting_evidence_ids": [f"historical:{old['run_id']}:R1", "R1"]})
         call = SimpleNamespace(id=str(len(calls)), function=SimpleNamespace(name=name, arguments=json.dumps(arguments)))
         return SimpleNamespace(usage=None, choices=[SimpleNamespace(message=SimpleNamespace(content=None, tool_calls=[call]))])

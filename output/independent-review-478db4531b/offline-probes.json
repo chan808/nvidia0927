@@ -1,0 +1,57 @@
+[
+  {
+    "report": "회원가입 API에서 500 requestId=claim-003",
+    "route": "GUIDANCE",
+    "correlation": "EXACT_ID",
+    "diagnosis_type": "expected_validation",
+    "finding_status": "OBSERVED_VALIDATION",
+    "observed_status": 422,
+    "claim_status": "PARTIAL",
+    "model_calls": 0,
+    "run_status": "COMPLETED"
+  },
+  {
+    "report": "회원가입 API에서 500 requestId=contract-001",
+    "route": "WORK_CANDIDATE",
+    "correlation": "EXACT_ID",
+    "diagnosis_type": "contract_mismatch",
+    "finding_status": "CONFIRMED_MISMATCH",
+    "observed_status": 422,
+    "claim_status": "PARTIAL",
+    "model_calls": 0,
+    "run_status": "COMPLETED"
+  },
+  {
+    "report": "회원가입 API에서 500 requestId=migration-002",
+    "route": "WORK_CANDIDATE",
+    "correlation": "EXACT_ID",
+    "diagnosis_type": "migration_missing",
+    "finding_status": "CONFIRMED_MISMATCH",
+    "observed_status": 500,
+    "claim_status": "MATCHED",
+    "model_calls": 0,
+    "run_status": "COMPLETED"
+  },
+  {
+    "report": "회원가입이 안 돼요.",
+    "route": "REQUEST_CONTEXT",
+    "correlation": "NEEDS_CONTEXT",
+    "diagnosis_type": null,
+    "finding_status": "INCONCLUSIVE",
+    "observed_status": null,
+    "claim_status": "UNVERIFIABLE",
+    "model_calls": 0,
+    "run_status": "WAITING_CONTEXT"
+  },
+  {
+    "case": "same structure; account_id/accountId replaces user_id/userId",
+    "route": "GUIDANCE",
+    "correlation": "EXACT_ID",
+    "diagnosis_type": "expected_validation",
+    "finding_status": "OBSERVED_VALIDATION",
+    "observed_status": 422,
+    "claim_status": "MATCHED",
+    "model_calls": 0,
+    "run_status": "COMPLETED"
+  }
+]
