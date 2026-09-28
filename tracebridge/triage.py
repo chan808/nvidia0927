@@ -12,6 +12,26 @@ from .evidence import EvidenceError, EvidenceSource, FIXTURE_SOURCE
 EXCEPTION_PATTERN = re.compile(r"\b(?:[A-Za-z_]\w*\.)*[A-Za-z_]\w*(?:Error|Exception|Fault)\b")
 
 
+def route_verdict(verdict: dict[str, Any], correlation: str) -> dict[str, Any]:
+    """The single routing policy for both intake paths; never grants execution rights."""
+    if correlation not in {"EXACT_ID", "CONTEXT_CANDIDATE"}:
+        return {"route": "REQUEST_CONTEXT", "work_role": None, "route_reason": "관측과 제보의 연결이 확인되지 않았습니다", "next_action": "문제가 난 화면·동작·대략적인 시각을 알려주세요."}
+    if correlation == "CONTEXT_CANDIDATE":
+        return {
+            "route": "INVESTIGATE", "work_role": "Correlation",
+            "route_reason": "범위가 맞는 한 요청 후보를 찾았지만 같은 사건인지 확인이 필요합니다",
+            "next_action": "같은 화면과 동작에서 발생한 문제인지 확인해 주세요.",
+        }
+    diagnosis = verdict["diagnosis_type"]
+    decisions = {
+        "expected_validation": ("GUIDANCE", None, "필수 입력 누락에 따른 응답을 확인했습니다. 입력 주체의 책임은 미확정입니다"),
+        "contract_mismatch": ("WORK_CANDIDATE", "Frontend/Caller Repair", "실제 요청 필드와 API 계약·DTO의 불일치를 확인했습니다"),
+        "migration_missing": ("WORK_CANDIDATE", "Data/Infrastructure", "백엔드 오류와 마이그레이션 상태 불일치를 확인했습니다"),
+    }
+    route, role, reason = decisions.get(diagnosis, ("INVESTIGATE", "Diagnosis", "현재 관측으로 원인과 조치 대상을 확정할 수 없어 추가 조사합니다"))
+    return {"route": route, "work_role": role, "route_reason": reason, "next_action": verdict["next_action"]}
+
+
 def _exception_hint(logs: list[str]) -> str | None:
     for line in logs:
         match = EXCEPTION_PATTERN.search(line)
@@ -80,14 +100,16 @@ def analyze(trace_id: str, claim: str | None = None, source: EvidenceSource | No
 
         dto = contract_data.get("backend_dto")
         if "userId" in missing and "user_id" in unexpected and isinstance(dto, dict) and "userId" in dto:
-            result.update(
-                finding_status="CONFIRMED_MISMATCH",
-                diagnosis_type="contract_mismatch",
-                next_action="요청 생성기의 user_id를 계약의 userId로 수정하고 같은 테스트를 다시 실행하세요.",
-                repro_eligible=source is None or source is FIXTURE_SOURCE,
-            )
             result["evidence"].append({"source": "backend_dto:SignupRequest", "fact": "백엔드 DTO도 userId를 요구"})
-            return result
+            # The structural difference alone does not explain a success or a 5xx.
+            if observed in (400, 422):
+                result.update(
+                    finding_status="CONFIRMED_MISMATCH",
+                    diagnosis_type="contract_mismatch",
+                    next_action="요청 생성기의 user_id를 계약의 userId로 수정하고 같은 테스트를 다시 실행하세요.",
+                    repro_eligible=source is None or source is FIXTURE_SOURCE,
+                )
+                return result
 
     logs: list[str] = []
     if isinstance(observed, int) and observed >= 500:
@@ -143,7 +165,9 @@ def analyze(trace_id: str, claim: str | None = None, source: EvidenceSource | No
 
 def summarize(result: dict[str, Any]) -> str:
     """Build the visible summary only from checked verdict fields."""
-    if "observed_status" not in result:
+    if "observed_status" in result and result["observed_status"] is None:
+        return "요청의 로그는 찾았지만 실제 응답 상태가 기록되지 않았습니다. 원인을 확인하려면 같은 사건의 관측을 더 확인해야 합니다."
+    if not isinstance(result.get("observed_status"), int):
         return "요청을 식별하지 못했습니다. trace ID, 환경, 발생 시각을 확인해 주세요."
 
     observed = result["observed_status"]

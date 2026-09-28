@@ -1,0 +1,2 @@
+2026-09-28T10:00:00+09:00 ERROR requestId=abc12345 realtime - ROOM_FULL
+    at handler.joinRoom(ws.go:2)

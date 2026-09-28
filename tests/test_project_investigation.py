@@ -90,19 +90,45 @@ def test_default_offline_path_does_not_read_gpt_key(monkeypatch):
 
 
 def test_redaction_keeps_request_id_and_removes_sensitive_values():
-    text = "requestId=abc12345 userId=123 email=a@example.invalid clientIp=192.0.2.2 Bearer abc.def"
+    text = "requestId=abc12345 userId=123 email=a@example.invalid clientIp=192.0.2.2 Bearer abc.def nvapi-abcdefghijklmnopqrstuvwxyz"
     cleaned = redact(text)
     assert "abc12345" in cleaned
     assert "userId=123" not in cleaned
     assert "a@example.invalid" not in cleaned
     assert "192.0.2.2" not in cleaned
     assert "Bearer abc.def" not in cleaned
+    assert "nvapi-abcdefghijklmnopqrstuvwxyz" not in cleaned
 
 
 def test_log_without_request_id_is_not_called_correlated():
     evidence, notes = log_evidence("ERROR ROOM_FULL", "방 입장 ROOM_FULL")
     assert evidence and not evidence[0].correlated
     assert any("requestId" in note for note in notes)
+
+
+def test_log_id_must_be_a_request_field_or_registered_mdc_prefix():
+    logs = (
+        "ERROR requestId=other note=abc12345 ROOM_FULL\n"
+        "ERROR arbitrary=abc12345 ROOM_FULL\n"
+        '{"level":"ERROR","requestId":"abc12345","message":"ROOM_FULL"}\n'
+        "2026-09-28 10:00:00.000 ERROR [abc12345] [192.0.2.2] ws - ROOM_FULL\n"
+        "2026-09-28 10:00:00.000 ERROR [other] [192.0.2.2] ws - requestId=abc12345\n"
+        "2026-09-28 10:00:00.000 ERROR [?] [192.0.2.2] ws - requestId=abc12345\n"
+    )
+    evidence, _ = log_evidence(logs, "requestId=abc12345 ROOM_FULL")
+    assert {item.source for item in evidence} == {"provided-log:3", "provided-log:4"}
+    assert all(item.correlated for item in evidence)
+
+
+def test_stack_continuation_cannot_inherit_correlation_from_another_request():
+    logs = (
+        "ERROR requestId=abc12345 ROOM_FULL\n"
+        "    at handler.joinRoom(ws.go:2)\n"
+        "    ERROR requestId=other dependency failure\n"
+        "    at other.handler(other.go:3)\n"
+    )
+    evidence, _ = log_evidence(logs, "requestId=abc12345 ROOM_FULL")
+    assert {item.source for item in evidence} == {"provided-log:1", "provided-log:2"}
 
 
 def test_gpt_wrapper_uses_structured_output_and_redacted_evidence():

@@ -1,0 +1,54 @@
+{
+  "project_id": "tracebridge-demo",
+  "events": [
+    {
+      "trace": {
+        "trace_id": "contract-001",
+        "occurred_at": "2026-09-28T10:00:00+09:00",
+        "environment": "dev",
+        "service": "account-api",
+        "operation": "회원가입",
+        "method": "POST",
+        "path": "/api/users",
+        "request": {"user_id": "demo-42", "name": "Demo User"},
+        "response_status": 422
+      },
+      "contract": {"required": ["userId", "name"], "properties": {"userId": "string", "name": "string"}},
+      "dto": {"userId": "str", "name": "str"},
+      "logs": ["ValidationError: userId is required"]
+    },
+    {
+      "trace": {
+        "trace_id": "claim-003",
+        "occurred_at": "2026-09-28T10:00:30+09:00",
+        "environment": "dev",
+        "service": "account-api",
+        "operation": "회원가입",
+        "method": "POST",
+        "path": "/api/users",
+        "request": {"userId": "demo-44"},
+        "response_status": 422
+      },
+      "contract": {"required": ["userId", "name"], "properties": {"userId": "string", "name": "string"}},
+      "dto": {"userId": "str", "name": "str"},
+      "logs": ["Request rejected: missing required field name"]
+    },
+    {
+      "trace": {
+        "trace_id": "migration-002",
+        "occurred_at": "2026-09-28T10:10:00+09:00",
+        "environment": "dev",
+        "service": "account-api",
+        "operation": "회원가입",
+        "method": "POST",
+        "path": "/api/users",
+        "request": {"userId": "demo-43", "name": "Demo User", "phone": "010-0000-0000"},
+        "response_status": 500
+      },
+      "contract": {"required": ["userId", "name"], "properties": {"userId": "string", "name": "string", "phone": "string"}},
+      "dto": {"userId": "str", "name": "str", "phone": "str"},
+      "logs": ["sqlite3.OperationalError: table users has no column named phone"],
+      "migration": {"applied": "V11", "expected": "V12", "related_file": "V12__add_phone.sql"}
+    }
+  ]
+}
