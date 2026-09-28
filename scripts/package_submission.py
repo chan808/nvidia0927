@@ -21,7 +21,18 @@ TOP_LEVEL = [
     "pyproject.toml",
     "requirements.txt",
 ]
-DIRECTORIES = ["tracebridge", "scripts", "tests", "skills"]
+DIRECTORIES = ["tracebridge", "scripts", "tests", "skills", "docs", "pages", "examples"]
+SOURCE_SUFFIXES = {".py", ".md", ".json", ".yml", ".yaml", ".toml", ".kts", ".kt", ".go", ".mod", ".log"}
+
+
+def runtime_artifact(path: Path) -> bool:
+    if any(part in {"tmp", "temp", "output", "generated", "__pycache__", ".pytest_cache"} for part in path.relative_to(ROOT).parts):
+        return True
+    if re.search(r"\.(?:db|sqlite3?|tmp|temp)(?:$|[-.])", path.name, re.I):
+        return True
+    # A configured DB with a source-looking extension must also stay out.
+    with path.open("rb") as stream:
+        return stream.read(16) == b"SQLite format 3\x00"
 
 
 def create_package(team_name: str) -> Path:
@@ -31,7 +42,12 @@ def create_package(team_name: str) -> Path:
     destination.parent.mkdir(exist_ok=True)
     sources = [ROOT / name for name in TOP_LEVEL]
     for directory in DIRECTORIES:
-        sources.extend(path for path in (ROOT / directory).rglob("*") if path.is_file() and path.suffix in {".py", ".md"})
+        sources.extend(
+            path for path in (ROOT / directory).rglob("*")
+            if path.is_file() and not path.is_symlink() and path.suffix in SOURCE_SUFFIXES
+            and path.resolve().is_relative_to(ROOT.resolve())
+            and not runtime_artifact(path)
+        )
     with ZipFile(destination, "w", compression=ZIP_DEFLATED) as archive:
         for path in sorted(sources):
             archive.write(path, path.relative_to(ROOT).as_posix())
