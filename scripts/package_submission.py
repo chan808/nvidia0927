@@ -19,9 +19,6 @@ TOP_LEVEL = [
     ".gitattributes",
     ".streamlit/config.toml",
     "README.md",
-    "DESIGN.md",
-    "SUBMISSION_DRAFT.md",
-    "SKILL_SCAN_REPORT.md",
     "app.py",
     "nat_workflow.yml",
     "pyproject.toml",
@@ -54,7 +51,10 @@ def _safe_source(path: Path, root: Path) -> bool:
     if any(parent.is_symlink() for parent in path.parents if parent != root and parent.is_relative_to(root)):
         return False
     relative = path.relative_to(root)
-    permitted_image = relative.parts[:3] == ("examples", "evaluation", "assets") and path.suffix.lower() == ".png"
+    permitted_image = path.suffix.lower() == ".png" and (
+        relative.parts[:3] == ("examples", "evaluation", "assets")
+        or relative.parts[:4] == ("docs", "validation", "assets", "local-gui")
+    )
     return (path.suffix.lower() in SOURCE_SUFFIXES or permitted_image) and not runtime_artifact(path, root)
 
 
@@ -79,7 +79,7 @@ def create_package(team_name: str | None = None, *, output_dir: str | Path | Non
     manifest = {"artifact_status": "DRAFT", "team_name": team_name,
                 "created_at": datetime.now(timezone.utc).isoformat(), "fresh_environment_verified": False,
                 "external_submission_performed": False, "source_changed_during_packaging": False, "files": {},
-                "limitations": ["Review archive; verification status is recorded in docs/main-integration.md when available",
+                "limitations": ["Review archive; verification status is recorded in docs/validation/main-integration.md when available",
                     "No runtime DB, secret, prior evaluation result or local output is included",
                     "New environment CLI/UI/restart verification remains a main integration gate"]}
     with ZipFile(destination, "x", compression=ZIP_DEFLATED) as archive:
@@ -93,7 +93,7 @@ def create_package(team_name: str | None = None, *, output_dir: str | Path | Non
             for name, item in manifest["files"].items())
         archive.writestr("DRAFT_PACKAGE_MANIFEST.json", json.dumps(manifest, ensure_ascii=False, indent=2))
         archive.writestr("DRAFT_NOTICE.md", "# DRAFT — 제출 전 검토용\n\n외부 제출을 수행하지 않은 검토용 묶음입니다. "
-                         "검증 범위는 docs/main-integration.md와 DRAFT_PACKAGE_MANIFEST.json을 확인하세요. "
+                         "검증 범위는 docs/validation/main-integration.md와 DRAFT_PACKAGE_MANIFEST.json을 확인하세요. "
                          "평가·매뉴얼 자료는 출처가 붙은 합성 예시이며 실제 사건 해결 성능을 뜻하지 않습니다.\n")
     destination.with_suffix(".manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     return destination

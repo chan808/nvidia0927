@@ -35,6 +35,7 @@ def main() -> None:
     parser.add_argument("--environment", help="Optional captured environment")
     parser.add_argument("--service", help="Optional captured service")
     parser.add_argument("--occurred-at", help="Optional ISO 8601 time including timezone")
+    parser.add_argument("--received-at", help="Original message receipt ISO 8601 time; preserves delayed reports' relative dates")
     parser.add_argument("--trace-id", help="Optional captured request identifier")
     parser.add_argument("--operation", help="Optional known screen action")
     parser.add_argument("--since-minutes", type=int, default=30, help="Recent Docker lookup window (1..120 minutes)")
@@ -65,6 +66,8 @@ def main() -> None:
             since_minutes=args.since_minutes, max_seconds=args.max_seconds, db_path=args.db,
             registered_seed=args.registered_seed, project_profile=profile, memory_enabled=not args.no_memory,
             observer_output_dir=args.metrics_dir)
+        if args.received_at:
+            options["message_received_at"] = args.received_at
         if args.capture_seed_action:
             if not args.registered_seed:
                 parser.error("--capture-seed-action requires --registered-seed")
@@ -81,7 +84,7 @@ def main() -> None:
         if args.confirm_candidate:
             result = confirm_candidate(result, args.confirm_candidate, **options)
         if args.prepare_change:
-            result = {"investigation": result, "change": prepare_submission(result, db_path=args.db, live=args.live)}
+            result = {"investigation": result, "change": prepare_submission(result, db_path=args.db, live=args.live, project_profile=profile)}
             result["presentation"] = presentation_status(result["investigation"], result["change"]["job"])
         else:
             result["presentation"] = presentation_status(result)

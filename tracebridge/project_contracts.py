@@ -7,7 +7,7 @@ import hashlib
 from typing import Any
 
 from .evidence import EvidenceError
-from .project_profile import ProjectProfile, _local_path, _read_json_file
+from .project_profile import ProjectProfile, registered_path, _read_json_file
 
 
 def _unwrap(document: dict, node: Any) -> Any:
@@ -58,7 +58,7 @@ def _resolve(document: dict, node: Any, *, seen: tuple[str, ...] = (), depth: in
 def _artifact(profile: ProjectProfile, location, method: str, path: str) -> tuple[dict | None, dict]:
     if location is None:
         return None, {"status": "UNOBSERVED", "source": None, "code_version": None}
-    location = _local_path(profile.root, str(location))
+    location = registered_path(profile, str(location))
     document, digest = _read_json_file(location)
     if not isinstance(document, dict):
         raise EvidenceError("Registered operation evidence must be an object")
@@ -99,7 +99,7 @@ def load_project_contract(profile: ProjectProfile, method: str, path: str, *, ru
         result["limitations"].append("OpenAPI source is not registered")
     else:
         try:
-            location = _local_path(profile.root, str(profile.openapi_path))
+            location = registered_path(profile, str(profile.openapi_path))
             document, digest = _read_json_file(location)
             if not isinstance(document, dict) or not str(document.get("openapi", "")).startswith("3."):
                 raise EvidenceError("Only registered OpenAPI 3 JSON documents are supported")
@@ -153,7 +153,10 @@ def load_project_contract(profile: ProjectProfile, method: str, path: str, *, ru
             source_name = caller.get("source")
             if not isinstance(source_name, str):
                 raise EvidenceError("Caller snapshot has no code source")
-            source = _local_path(profile.root, source_name.split("#", 1)[0])
+            reference = source_name.split("#", 1)[0]
+            if caller.get("repository") is not None:
+                reference = {"repository": caller["repository"], "path": reference}
+            source = registered_path(profile, reference)
             try:
                 with source.open("rb") as stream:
                     code = stream.read(300_001)

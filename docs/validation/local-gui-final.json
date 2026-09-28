@@ -1,0 +1,169 @@
+{
+  "verified_at": "2026-09-28T23:17:34.263074+00:00",
+  "method": "REAL_BROWSER_GUI_AND_REAL_LOCAL_FILES",
+  "project_id": "gui-local-37a6651e",
+  "material": "PUBLIC_SYNTHETIC_TWO_REPOSITORY_PROJECT",
+  "gui_steps": [
+    "path registration",
+    "policy registration",
+    "report",
+    "timestamp follow-up",
+    "provider failure preserved",
+    "same-incident retry",
+    "live candidate checks",
+    "diff review",
+    "original application",
+    "browser reload and saved incident resume"
+  ],
+  "candidate_attempts": [
+    {
+      "work_id": "92160b20d41a4660bbce9fac9e9f42be",
+      "status": "MODEL_FAILED",
+      "model": {
+        "actual_calls": 1,
+        "mode": "NVIDIA_LIVE",
+        "model": "nvidia/nemotron-3-super-120b-a12b",
+        "test_double_calls": 0
+      },
+      "checks": [
+        {
+          "phase": "before",
+          "status": "FAILED",
+          "exit_code": 1
+        }
+      ],
+      "original_unchanged_during_preparation": true,
+      "artifact_ref": "C:\\Users\\freetime\\Desktop\\nvidiatest\\output\\tracebridge\\project-changes\\92160b20d41a4660bbce9fac9e9f42be\\result.json"
+    },
+    {
+      "work_id": "d8ed43fb625e4a1c8c9beff1a383949d",
+      "status": "CHANGE_PREPARED",
+      "model": {
+        "actual_calls": 1,
+        "mode": "NVIDIA_LIVE",
+        "model": "nvidia/nemotron-3-super-120b-a12b",
+        "response_id": "chatcmpl-12d0786e-2214-43d9-8f57-0b1e4e8080cb",
+        "test_double_calls": 0,
+        "usage": {
+          "completion_tokens": 228,
+          "completion_tokens_details": null,
+          "prompt_tokens": 1131,
+          "prompt_tokens_details": null,
+          "total_tokens": 1359
+        }
+      },
+      "checks": [
+        {
+          "phase": "before",
+          "status": "FAILED",
+          "exit_code": 1
+        },
+        {
+          "phase": "after",
+          "status": "PASSED",
+          "exit_code": 0
+        },
+        {
+          "phase": "regression",
+          "status": "PASSED",
+          "exit_code": 0
+        }
+      ],
+      "original_unchanged_during_preparation": true,
+      "artifact_ref": "C:\\Users\\freetime\\Desktop\\nvidiatest\\output\\tracebridge\\project-changes\\d8ed43fb625e4a1c8c9beff1a383949d\\result.json"
+    }
+  ],
+  "application": {
+    "run_id": "e186d1b206014cd5ba3954350f118eeb",
+    "revision": 6,
+    "fix_applied": true,
+    "fix_verified": false,
+    "cause_confirmed": false,
+    "service_recovery": "NOT_VERIFIED",
+    "deployment_status": "NOT_ATTEMPTED",
+    "post_apply_original_checks": [
+      {
+        "id": "boundary",
+        "exit_code": 0,
+        "marker": "CHECK_PASSED"
+      },
+      {
+        "id": "regression",
+        "exit_code": 0,
+        "marker": "CHECK_PASSED"
+      }
+    ]
+  },
+  "offline_reconnect": {
+    "job_id": "eabf58470c0b4518a25cfe043139e93f",
+    "transitions": [
+      "QUEUED_WHILE_RUNNER_OFFLINE",
+      "SUCCEEDED"
+    ],
+    "epoch": 1,
+    "model_calls": 0,
+    "correlation": "NEEDS_CONTEXT",
+    "project_id": "daily-local"
+  },
+  "gui_reopen_exceptions": 0,
+  "screenshots": [
+    "docs/validation/assets/local-gui/candidate-review.png",
+    "docs/validation/assets/local-gui/applied-reopened.png",
+    "docs/validation/assets/local-gui/runner-offline-queued.png",
+    "docs/validation/assets/local-gui/reconnected.png"
+  ],
+  "fixed_during_verification": [
+    "blank editor row handling",
+    "selected project after registration",
+    "missing log/time guidance",
+    "stale candidate after follow-up",
+    "approval limited to candidate and diff",
+    "missing history after application",
+    "applied status after resume"
+  ],
+  "limitations": [
+    "Private owner loopback HTTP",
+    "daily persistent logs and runtime version not registered",
+    "daily development servers unavailable in final session",
+    "No daily source application or database mutation",
+    "No production HTTPS deployment or adversarial Docker validation"
+  ],
+  "source_sha256": {
+    "pages/2_Report_Agent.py": "1552d4519a1408c652a55ae87db9a12011c2369d9e4838aff5c7f166317190b0",
+    "tracebridge/report_agent.py": "7d63fa05697949c63cc0531dc4193152e1adb187826e829328d431b4c6c72b11",
+    "tracebridge/project_registration_ui.py": "63738de71bfb7765572c53a4dd8212ab32a43d7d623ab1d98530c72f9eca2402",
+    "tests/test_registered_project_repair.py": "1ac145af67bc54efa1e220a5b29aa4428bbb3c36663313722bcbe1e45ddfa39c",
+    "tests/test_multi_repository.py": "a14dc6e66e6d1f5a2e9d36c64c2a5c7f924f9417611a087422910cf38018bf7f",
+    "scripts/setup_gui_validation.py": "9ceba3834e432b1cce2e9bbe999eab39e9d8bc29cca68e24083c6b245ad93306"
+  },
+  "regression": {
+    "passed": 551,
+    "failed": 0,
+    "elapsed_seconds": 110.5,
+    "command": "python -m pytest tests -q --basetemp output/verification-final-gui-applied"
+  },
+  "dependency_check": "No broken requirements found",
+  "browser_error_logs": {
+    "local": [],
+    "remote": []
+  },
+  "release_documentation_check": {
+    "markdown_files": 57,
+    "local_links": 350,
+    "broken_links": 0,
+    "verified_source_hash_mismatches": 0,
+    "known_secret_pattern_findings": 0,
+    "packaging_rechecks_passed": 3,
+    "packaging_rechecks": [
+      "test_submission_contains_working_pages_inputs_and_fixture_manifests",
+      "test_package_excludes_database_backups_temp_and_renamed_sqlite",
+      "test_packaging_excludes_disguised_db_credentials_and_runtime_output"
+    ],
+    "screenshot_sha256": {
+      "docs/validation/assets/local-gui/candidate-review.png": "33025deb7b24e0487fd99b87ee6a6c96e257cf55beb3015febecaf2f1ae3186a",
+      "docs/validation/assets/local-gui/applied-reopened.png": "243d156e5b6ea598403bfe27532ed1a4fafce0abccabf14b070fed47d9add786",
+      "docs/validation/assets/local-gui/runner-offline-queued.png": "8588dc477e32dd8e7b24ab18dee5e63133c9edff6e93f0ba6b43b186869f02e0",
+      "docs/validation/assets/local-gui/reconnected.png": "f1493fa22e730082492cb67eeea29a62bd48d4a444aed3efec65a61bc2930977"
+    }
+  }
+}

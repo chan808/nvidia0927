@@ -1,0 +1,21 @@
+# Use the existing Agolive Nginx ingress; do not start a second public proxy.
+# The observed 2 GB host has limited available memory. This is a bounded
+# single-user trial, not a verified capacity allocation.
+services:
+  web:
+    container_name: tracebridge-web
+    mem_limit: 512m
+    cpus: 0.5
+    networks:
+      default: {}
+      existing-ingress:
+        aliases:
+          - tracebridge-web
+  proxy:
+    profiles:
+      - standalone-proxy
+
+networks:
+  existing-ingress:
+    external: true
+    name: ${TRACEBRIDGE_INGRESS_NETWORK:?Set the actual existing Nginx Docker network}

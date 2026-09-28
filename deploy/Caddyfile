@@ -1,0 +1,13 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$TRACEBRIDGE_DOMAIN} {
+	# This protects a private preview. It is not project/user authorization.
+	basic_auth {
+		{$CADDY_USERNAME} {$CADDY_PASSWORD_HASH}
+	}
+
+	# Caddy handles Streamlit's WebSocket upgrade as well as HTTP.
+	reverse_proxy web:8501
+}

@@ -186,7 +186,7 @@ def _evidence(item: dict, run_id: str, *, inherited_clue: bool = False) -> dict:
         raise ValueError("Evidence belongs to another run")
     output = _metadata({key: item[key] for key in (
         "id", "kind", "source", "source_system", "service", "event_at", "environment", "trace_id",
-        "correlated", "scope_status", "scope_checks", "scope", "source_revision",
+        "correlated", "scope_status", "scope_checks", "scope", "source_revision", "repository_id", "source_tree_dirty",
         "image_sha256", "confidence", "inference",
     ) if key in item})
     content = item.get("content", item.get("fact", ""))
@@ -244,7 +244,7 @@ def minimal_record(result: dict) -> dict:
     record.update(revision=revision, record_format="minimal_sqlite_v1")
     for key in ("summary", "route_reason", "next_action"):
         record[key] = _text(result.get(key, ""))
-    for key in ("scope", "candidates", "candidate_trace_ids", "version_provenance", "log_scope", "usage", "timeout_reasons", "hypothesis_updates", "relative_date_basis", "correlation_confirmation"):
+    for key in ("scope", "candidates", "candidate_trace_ids", "version_provenance", "log_scope", "usage", "timeout_reasons", "hypothesis_updates", "relative_date_basis", "correlation_confirmation", "source_registration"):
         record[key] = _metadata(result.get(key, [] if key in {"candidates", "candidate_trace_ids", "timeout_reasons", "hypothesis_updates"} else {}))
     if "responsibility" in result:
         record["responsibility"] = _selected(result["responsibility"], ("status", "reason", "fields", "evidence_sources"))
@@ -718,6 +718,56 @@ class IncidentStore:
                     job["source_run_id"], job["result_run_id"], digest, _json(record)))
             except sqlite3.IntegrityError as exc:
                 raise RunConflict("Source run already has a change job") from exc
+        return "SAVED"
+
+    def save_project_change(self, job: dict, run: dict) -> str:
+        """A separate generic candidate contract; the seed validator remains strict."""
+        for key in ("work_id", "project_id", "incident_id", "source_run_id", "result_run_id"):
+            _id(job[key], key)
+        if (job.get("record_format") != "project_change_job_v1" or len(_json(job)) > 100_000
+                or job.get("case_kind") != "REGISTERED_PROJECT"
+                or job.get("status") not in {"CHANGE_PREPARED", "POLICY_REJECTED", "NOT_REPRODUCED", "MODEL_NOT_REQUESTED", "MODEL_FAILED", "VERIFICATION_FAILED", "TIMED_OUT"}
+                or job.get("review_status") != "WAITING_REVIEW" or job.get("original_applied") is not False
+                or job.get("deployment_status") != "NOT_ATTEMPTED" or job.get("service_recovery") != "NOT_VERIFIED"
+                or any(run.get(key) is not False for key in ("cause_confirmed", "fix_applied", "fix_verified"))
+                or (run.get("project_id"), run.get("incident_id"), run.get("run_id")) != (job["project_id"], job["incident_id"], job["result_run_id"])
+                or run.get("change", {}).get("work_id") != job["work_id"]
+                or run["change"].get("verification_scope") != "REGISTERED_PROJECT_SNAPSHOT_ONLY"):
+            raise ValueError("Invalid registered project candidate record")
+        checks = job.get("checks", [])
+        check_ids = job.get("policy", {}).get("check_ids", [])
+        verified = (job["status"] == "CHANGE_PREPARED" and job.get("original_unchanged") is True
+            and bool(job.get("baseline", {}).get("snapshot_sha256")) and bool(job.get("candidate", {}).get("snapshot_sha256"))
+            and bool(job.get("diff", {}).get("sha256")) and job.get("identical_related_check") is True
+            and len(check_ids) == 2 and len(checks) == 3
+            and [item["phase"] for item in checks] == ["before", "after", "regression"]
+            and [item["status"] for item in checks] == ["FAILED", "PASSED", "PASSED"]
+            and [item["exit_code"] for item in checks] == [1, 0, 0]
+            and [item["command_id"] for item in checks] == [check_ids[0], check_ids[0], check_ids[1]]
+            and all(item.get("candidate_integrity") == "UNCHANGED" for item in checks)
+            and checks[0].get("failure_marker_observed") is True
+            and all(item.get("success_marker_observed") is True for item in checks[1:])
+            and checks[0]["argv"] == checks[1]["argv"] and checks[0]["input"] == checks[1]["input"]
+            and checks[0]["execution_settings_sha256"] == checks[1]["execution_settings_sha256"])
+        if job.get("candidate_fix_verified") is not verified or run["change"].get("candidate_fix_verified") is not verified or (job["status"] == "CHANGE_PREPARED") != verified:
+            raise ValueError("Candidate verification requires recorded reproduction and regression")
+        digest = _hash(_json({"job": job, "run": run}))
+        with self.connection:
+            self.connection.execute("BEGIN IMMEDIATE")
+            old = self.connection.execute("SELECT content_hash FROM change_jobs WHERE work_id=?", (job["work_id"],)).fetchone()
+            if old:
+                if old["content_hash"] != digest:
+                    raise RunConflict("Change job already has different contents")
+                return "ALREADY_SAVED"
+            source = self.get_run(job["project_id"], job["source_run_id"])
+            incident = self.get_incident(job["project_id"], job["incident_id"])
+            if (source["incident_id"] != job["incident_id"] or _hash(_json(source)) != job["source_record_sha256"]
+                    or incident["latest_run_id"] != source["run_id"] or run["revision"] != incident["latest_revision"] + 1):
+                raise RunConflict("Source run changed; preserve the obtained result for review")
+            self._insert_run(run)
+            record = deepcopy(job)
+            self.connection.execute("INSERT INTO change_jobs VALUES (?,?,?,?,?,?,?)", (job["work_id"], job["project_id"], job["incident_id"],
+                job["source_run_id"], job["result_run_id"], digest, _json(record)))
         return "SAVED"
 
     def find_change(self, project_id: str, source_run_id: str) -> dict | None:

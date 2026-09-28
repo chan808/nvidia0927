@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 from pathlib import Path
@@ -19,6 +19,18 @@ class LocalLogSource:
     id: str
     path: Path
     format: str = "jsonl"
+    root: Path | None = None
+    timezone: str | None = None
+    service: str | None = None
+
+
+@dataclass(frozen=True)
+class RegisteredRepository:
+    id: str
+    service: str
+    root: Path
+    code_roots: tuple[Path, ...]
+    git_root: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -26,6 +38,16 @@ class VersionObservation:
     method: str = "none"
     path: Path | None = None
     field: str = "version"
+
+
+@dataclass(frozen=True)
+class RegisteredService:
+    id: str
+    log_source_ids: tuple[str, ...] = ()
+    openapi_path: Path | None = None
+    dto_path: Path | None = None
+    caller_evidence_path: Path | None = None
+    version_observation: VersionObservation = VersionObservation()
 
 
 @dataclass(frozen=True)
@@ -42,6 +64,23 @@ class ProjectProfile:
     version_observation: VersionObservation = VersionObservation()
     policy_refs: tuple[str, ...] = ()
     config_path: Path | None = None
+    repositories: tuple[RegisteredRepository, ...] = ()
+    services: tuple[RegisteredService, ...] = ()
+
+
+def select_project_service(profile: ProjectProfile, service: str | None = None) -> ProjectProfile:
+    target = service or profile.service
+    if not profile.services:
+        if target != profile.service:
+            raise EvidenceError("Requested service is not registered for this project")
+        return profile
+    entry = next((item for item in profile.services if item.id == target), None)
+    if entry is None:
+        raise EvidenceError("Requested service is not registered for this project")
+    return replace(profile, service=target,
+        log_sources=tuple(item for item in profile.log_sources if item.id in entry.log_source_ids),
+        openapi_path=entry.openapi_path, dto_path=entry.dto_path,
+        caller_evidence_path=entry.caller_evidence_path, version_observation=entry.version_observation)
 
 
 def _text(value: Any, name: str) -> str:
@@ -61,6 +100,38 @@ def _local_path(root: Path, value: Any) -> Path:
     if not resolved.is_relative_to(root.resolve()):
         raise EvidenceError("Registered source path must remain within the project root")
     return resolved
+
+
+def _root_path(base: Path, value: Any) -> Path:
+    text = _text(value, "Repository root")
+    if "://" in text or text.startswith(("\\\\", "//")) or "\x00" in text:
+        raise EvidenceError("Repository root must be a local directory")
+    path = Path(text)
+    if ":" in text and not path.is_absolute():
+        raise EvidenceError("Device paths and file streams are unsupported")
+    path = (base / path).resolve()
+    if not path.is_dir():
+        raise EvidenceError("Registered repository directory does not exist on the executing computer")
+    return path
+
+
+def registered_path(profile: ProjectProfile, value: Any) -> Path:
+    """Resolve an explicit artifact inside one declared root, never their parent."""
+    if isinstance(value, dict):
+        if set(value) != {"repository", "path"}:
+            raise EvidenceError("Artifact reference accepts repository/path only")
+        repository = next((item for item in profile.repositories if item.id == value["repository"]), None)
+        if repository is None:
+            raise EvidenceError("Unknown registered repository")
+        return _local_path(repository.root, value["path"])
+    text = _text(value, "Registered path")
+    path = Path(text)
+    if not path.is_absolute():
+        return _local_path(profile.root, text)
+    for root in (profile.root, *(item.root for item in profile.repositories)):
+        if path.resolve().is_relative_to(root.resolve()):
+            return _local_path(root, text)
+    raise EvidenceError("Path is outside every registered repository")
 
 
 def _read_json_file(path: Path, *, max_bytes: int = 1_000_000) -> tuple[Any, str]:
@@ -83,7 +154,7 @@ def load_project_profile(path: str | Path) -> ProjectProfile:
     data, _ = _read_json_file(config_path, max_bytes=64_000)
     allowed = {
         "project_id", "service", "environment", "root", "code_roots", "log_sources",
-        "openapi_path", "dto_path", "caller_evidence_path", "version_observation", "policy_refs",
+        "openapi_path", "dto_path", "caller_evidence_path", "version_observation", "policy_refs", "repositories", "services",
     }
     if not isinstance(data, dict) or set(data) - allowed:
         raise EvidenceError("Project profile contains unsupported settings (including execution or secrets)")
@@ -94,7 +165,31 @@ def load_project_profile(path: str | Path) -> ProjectProfile:
     root_path = Path(root_text)
     if ":" in root_text and not root_path.is_absolute():
         raise EvidenceError("Device paths and file streams are unsupported")
-    root = (config_path.parent / root_path).resolve()
+    root = _root_path(config_path.parent, root_text)
+    repositories = data.get("repositories", [])
+    if not isinstance(repositories, list) or len(repositories) > 16:
+        raise EvidenceError("repositories must contain at most 16 registered roots")
+    registered = []
+    for item in repositories:
+        if not isinstance(item, dict) or set(item) - {"id", "service", "root", "code_roots", "git_root"}:
+            raise EvidenceError("Repository accepts id/service/root/code_roots only")
+        id_ = _text(item.get("id"), "Repository id")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", id_):
+            raise EvidenceError("Repository id accepts letters, numbers, underscores and hyphens")
+        location = _root_path(config_path.parent, item.get("root"))
+        directories = item.get("code_roots", ["."])
+        if not isinstance(directories, list) or len(directories) > 16:
+            raise EvidenceError("Repository code_roots must contain at most 16 paths")
+        git_root = _root_path(config_path.parent, item["git_root"]) if item.get("git_root") else None
+        if git_root and not location.is_relative_to(git_root):
+            raise EvidenceError("Git metadata root must contain the registered source root")
+        registered.append(RegisteredRepository(id_, _text(item.get("service"), "Repository service"), location,
+                                              tuple(_local_path(location, entry) for entry in directories), git_root))
+    if len({item.id for item in registered}) != len(registered):
+        raise EvidenceError("Repository ids must be unique")
+    if any(item.git_root and item.git_root not in {root, *(entry.root for entry in registered)} for item in registered):
+        raise EvidenceError("Git metadata root must be one of the explicitly registered roots")
+    resolver = ProjectProfile("registration", "registration", "registration", root, repositories=tuple(registered))
     code_roots = data.get("code_roots", [])
     log_sources = data.get("log_sources", [])
     policies = data.get("policy_refs", [])
@@ -104,12 +199,23 @@ def load_project_profile(path: str | Path) -> ProjectProfile:
         raise EvidenceError("log_sources must be a bounded list")
     sources: list[LocalLogSource] = []
     for entry in log_sources:
-        if not isinstance(entry, dict) or set(entry) - {"id", "path", "format"}:
-            raise EvidenceError("Log source accepts only id/path/format")
+        if not isinstance(entry, dict) or set(entry) - {"id", "path", "format", "repository", "timezone", "service"}:
+            raise EvidenceError("Log source accepts only id/path/format/repository/timezone")
         format_ = entry.get("format", "jsonl")
-        if format_ not in {"json", "jsonl"}:
-            raise EvidenceError("Only local JSON/JSONL logs are supported")
-        sources.append(LocalLogSource(_text(entry.get("id"), "Log source id"), _local_path(root, entry.get("path")), format_))
+        if format_ not in {"json", "jsonl", "text"}:
+            raise EvidenceError("Only local JSON/JSONL/text logs are supported")
+        ref = {"repository": entry["repository"], "path": entry.get("path")} if "repository" in entry else entry.get("path")
+        location = registered_path(resolver, ref)
+        source_root = next((item.root for item in registered if "repository" in entry and item.id == entry["repository"]), None)
+        if source_root is None:
+            source_root = next((candidate for candidate in (root, *(item.root for item in registered)) if location.is_relative_to(candidate)), root)
+        timezone_ = entry.get("timezone")
+        if timezone_ is not None:
+            from .project_sources import _registered_timezone
+            if not isinstance(timezone_, str) or _registered_timezone(timezone_) is None:
+                raise EvidenceError("Log timezone must be UTC or a valid +/-HH:MM offset")
+        service_ = _text(entry["service"], "Log source service") if entry.get("service") is not None else None
+        sources.append(LocalLogSource(_text(entry.get("id"), "Log source id"), location, format_, source_root, timezone_, service_))
     if len({source.id for source in sources}) != len(sources):
         raise EvidenceError("Log source ids must be unique")
     if not isinstance(policies, list) or len(policies) > 16 or any(not isinstance(item, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", item) for item in policies):
@@ -124,15 +230,41 @@ def load_project_profile(path: str | Path) -> ProjectProfile:
         raise EvidenceError("Only json_file version observation accepts a path")
     if str(version.get("field", "version")).casefold() in {"token", "password", "secret", "authorization", "api_key"}:
         raise EvidenceError("Version observation cannot use a credential field")
-    optional = {key: _local_path(root, data[key]) if data.get(key) is not None else None
+    optional = {key: registered_path(resolver, data[key]) if data.get(key) is not None else None
                 for key in ("openapi_path", "dto_path", "caller_evidence_path")}
+    service_entries = data.get("services", [])
+    if not isinstance(service_entries, list) or len(service_entries) > 16:
+        raise EvidenceError("services must contain at most 16 registered services")
+    services = []
+    for entry in service_entries:
+        if not isinstance(entry, dict) or set(entry) - {"id", "log_source_ids", "openapi_path", "dto_path", "caller_evidence_path", "version_observation"}:
+            raise EvidenceError("Service accepts id/log_source_ids/contract paths/version observation only")
+        id_ = _text(entry.get("id"), "Service id")
+        ids = entry.get("log_source_ids", [item.id for item in sources if item.service == id_])
+        if not isinstance(ids, list) or any(not isinstance(value, str) or value not in {item.id for item in sources} for value in ids) or len(set(ids)) != len(ids):
+            raise EvidenceError("Service log_source_ids must reference registered logs")
+        if any(item.service and item.service != id_ for item in sources if item.id in ids):
+            raise EvidenceError("Service log source belongs to another service")
+        paths = {key: registered_path(resolver, entry[key]) if entry.get(key) is not None else None
+                 for key in ("openapi_path", "dto_path", "caller_evidence_path")}
+        observed = entry.get("version_observation", {"method": "none"})
+        if not isinstance(observed, dict) or set(observed) - {"method", "path", "field"} or observed.get("method", "none") not in {"none", "json_file", "log_field"}:
+            raise EvidenceError("Unsupported service version observation")
+        observed_method = observed.get("method", "none")
+        observed_field = _text(observed.get("field", "version"), "Version field")
+        if observed_field.casefold() in {"token", "password", "secret", "authorization", "api_key"} or observed_method != "json_file" and "path" in observed:
+            raise EvidenceError("Unsupported service version field/path")
+        observed_path = registered_path(resolver, observed.get("path")) if observed_method == "json_file" else None
+        services.append(RegisteredService(id_, tuple(ids), version_observation=VersionObservation(observed_method, observed_path, observed_field), **paths))
+    if len({item.id for item in services}) != len(services) or services and data.get("service") not in {item.id for item in services}:
+        raise EvidenceError("Service ids must be unique and include the primary service")
     return ProjectProfile(
         project_id=_text(data.get("project_id"), "project_id"), service=_text(data.get("service"), "service"),
         environment=_text(data.get("environment"), "environment"), root=root,
         code_roots=tuple(_local_path(root, entry) for entry in code_roots), log_sources=tuple(sources),
-        version_observation=VersionObservation(method, _local_path(root, version.get("path")) if method == "json_file" else None,
+        version_observation=VersionObservation(method, registered_path(resolver, version.get("path")) if method == "json_file" else None,
                                                _text(version.get("field", "version"), "Version field")),
-        policy_refs=tuple(policies), config_path=config_path, **optional,
+        policy_refs=tuple(policies), config_path=config_path, repositories=tuple(registered), services=tuple(services), **optional,
     )
 
 
@@ -214,7 +346,7 @@ def read_project_logs(profile: ProjectProfile, *, max_bytes: int = 1_000_000, ma
         result["sources"].append(report)
         try:
             # Resolve again: a symlink or a replaced path must not escape registration.
-            path = _local_path(profile.root, str(source.path))
+            path = _local_path(source.root or profile.root, str(source.path))
             with path.open("rb") as stream:
                 raw = stream.read(remaining + 1)
             if len(raw) > remaining:
@@ -229,7 +361,7 @@ def read_project_logs(profile: ProjectProfile, *, max_bytes: int = 1_000_000, ma
                 records = document.get("events", [document]) if isinstance(document, dict) else document
                 if not isinstance(records, list):
                     raise EvidenceError("JSON log must be an event, event array or events catalog")
-            else:
+            elif source.format == "jsonl":
                 records = []
                 for line in raw.decode("utf-8-sig").splitlines():
                     if line.strip():
@@ -237,6 +369,15 @@ def read_project_logs(profile: ProjectProfile, *, max_bytes: int = 1_000_000, ma
                             records.append(json.loads(line))
                         except json.JSONDecodeError:
                             report["limitations"].append("invalid_jsonl_record")
+            else:
+                from .project_sources import _log_record
+                records = []
+                for line in raw.decode("utf-8-sig").splitlines():
+                    if line.strip():
+                        event, _ = _log_record(line, source_metadata={"service": source.service or profile.service,
+                            "environment": profile.environment, "timezone": source.timezone, "exact_service_ids": True})
+                        event["logs"] = [line]
+                        records.append(event)
             for record in records:
                 report["records"] += 1
                 record_count += 1
@@ -269,7 +410,7 @@ def observe_project_version(profile: ProjectProfile) -> dict:
         return result
     if observation.method == "json_file":
         try:
-            path = _local_path(profile.root, str(observation.path))
+            path = registered_path(profile, str(observation.path))
             data, digest = _read_json_file(path, max_bytes=64_000)
             if not isinstance(data, dict) or any(data.get(key, getattr(profile, key)) != getattr(profile, key)
                                                  for key in ("project_id", "service", "environment")):

@@ -29,8 +29,11 @@ def preparation_blockers(result: dict) -> list[str]:
     ) if rejected]
 
 
-def prepare_submission(result: dict, *, db_path=None, live: bool = False, proposer=None) -> dict:
+def prepare_submission(result: dict, *, db_path=None, live: bool = False, proposer=None, project_profile=None, policy_id=None) -> dict:
     """Prepare only a saved registered candidate; the worker rechecks its policy."""
+    if project_profile is not None:
+        from .project_repair import prepare_project_change
+        return prepare_project_change(result, project_profile, db_path=db_path, live=live, proposer=proposer, policy_id=policy_id)
     blockers = preparation_blockers(result)
     if blockers:
         raise ValueError("수정안을 준비할 수 없습니다: " + ", ".join(blockers))

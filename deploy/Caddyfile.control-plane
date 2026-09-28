@@ -1,0 +1,16 @@
+{
+    email {$ACME_EMAIL}
+}
+
+{$TRACEBRIDGE_DOMAIN} {
+    # API uses scoped bearer credentials; its pairing endpoint uses a one-use code.
+    handle /v1/* {
+        reverse_proxy control:8765
+    }
+    handle {
+        basic_auth {
+            {$CADDY_USERNAME} {$CADDY_PASSWORD_HASH}
+        }
+        reverse_proxy web:8501
+    }
+}

@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.example
+app.env
+app.env.*
+!app.env.example
+*.override.yaml
+*.override.yml

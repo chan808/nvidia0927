@@ -1,0 +1,79 @@
+name: tracebridge
+
+services:
+  web:
+    image: ${TRACEBRIDGE_IMAGE:-tracebridge:preview}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim-bookworm}
+        TRACEBRIDGE_REVISION: ${TRACEBRIDGE_REVISION:-unrecorded}
+    restart: unless-stopped
+    init: true
+    env_file:
+      - ${TRACEBRIDGE_APP_ENV_FILE:-./app.env}
+    environment:
+      TRACEBRIDGE_SERVICE_PROJECT: seed
+      TRACEBRIDGE_ALLOW_PROJECT_REGISTRATION: "0"
+      TRACEBRIDGE_DB_PATH: /app/output/tracebridge/incidents.sqlite3
+      TRACEBRIDGE_PROJECT_REGISTRY: /app/output/project-profiles
+      STREAMLIT_BROWSER_SERVER_ADDRESS: ${TRACEBRIDGE_DOMAIN:?Set TRACEBRIDGE_DOMAIN in deploy/.env}
+      STREAMLIT_BROWSER_SERVER_PORT: "443"
+      STREAMLIT_SERVER_COOKIE_SECRET: ${STREAMLIT_SERVER_COOKIE_SECRET:?Set a random cookie secret in deploy/.env}
+      STREAMLIT_SERVER_ENABLE_CORS: "true"
+      STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION: "true"
+      STREAMLIT_SERVER_FILE_WATCHER_TYPE: none
+    expose:
+      - "8501"
+    volumes:
+      - type: bind
+        source: ${TRACEBRIDGE_DATA_DIR:?Set an absolute server data directory in deploy/.env}
+        target: /app/output
+        bind:
+          create_host_path: false
+    read_only: true
+    tmpfs:
+      - /tmp:size=134217728,mode=1777
+      - /app/generated:size=67108864,uid=10001,gid=10001,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g
+    cpus: 1.5
+    pids_limit: 256
+    stop_grace_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  proxy:
+    image: ${CADDY_IMAGE:-caddy:2-alpine}
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      TRACEBRIDGE_DOMAIN: ${TRACEBRIDGE_DOMAIN:?Set TRACEBRIDGE_DOMAIN in deploy/.env}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in deploy/.env}
+      CADDY_USERNAME: ${CADDY_USERNAME:?Set CADDY_USERNAME in deploy/.env}
+      CADDY_PASSWORD_HASH: ${CADDY_PASSWORD_HASH:?Set CADDY_PASSWORD_HASH in deploy/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  caddy_data:
+  caddy_config:

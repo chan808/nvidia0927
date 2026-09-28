@@ -1,0 +1,99 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: TraceBridge single EC2 foundation. Create only after confirming the target account Free plan.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Existing default VPC in the chosen region.
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet in that VPC with an Internet Gateway route.
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: SSH key pair created in this new account and region.
+  AdminSshCidr:
+    Type: String
+    AllowedPattern: '(\d{1,3}\.){3}\d{1,3}/32'
+    ConstraintDescription: Use your administrator IPv4 address followed by /32.
+    Description: Administrator IPv4 /32. SSH is restricted to this address.
+  UbuntuAmi:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+  RootVolumeGiB:
+    Type: Number
+    Default: 30
+    MinValue: 20
+    MaxValue: 50
+
+Resources:
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: TraceBridge HTTPS, ACME HTTP, and restricted administrator SSH.
+      VpcId:
+        Ref: VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp:
+            Ref: AdminSshCidr
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Project
+          Value: tracebridge
+
+  WebInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.small
+      ImageId:
+        Ref: UbuntuAmi
+      KeyName:
+        Ref: KeyPairName
+      CreditSpecification:
+        CPUCredits: standard
+      MetadataOptions:
+        HttpTokens: required
+        HttpEndpoint: enabled
+      NetworkInterfaces:
+        - DeviceIndex: "0"
+          AssociatePublicIpAddress: true
+          SubnetId:
+            Ref: SubnetId
+          GroupSet:
+            - Fn::GetAtt: [WebSecurityGroup, GroupId]
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeType: gp3
+            VolumeSize:
+              Ref: RootVolumeGiB
+            Encrypted: true
+            # Preserve the data disk on termination; retained EBS still consumes
+            # credits/charges and must be explicitly managed after backup.
+            DeleteOnTermination: false
+      Tags:
+        - Key: Name
+          Value: tracebridge
+        - Key: Project
+          Value: tracebridge
+
+Outputs:
+  InstanceId:
+    Value:
+      Ref: WebInstance
+  PublicIp:
+    Value:
+      Fn::GetAtt: [WebInstance, PublicIp]
+    Description: This automatically assigned address can change on stop/start.
+  SecurityGroupId:
+    Value:
+      Fn::GetAtt: [WebSecurityGroup, GroupId]

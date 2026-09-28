@@ -10,38 +10,64 @@ import streamlit as st
 from tracebridge.report_agent import confirm_candidate, investigate_submission, nvidia_settings
 from tracebridge.report_contract import KST, ReportContext, event_time, presentation_status
 from tracebridge.incident_memory import IncidentStore, db_location, persist_result, export_manual
-from tracebridge.project_profile import load_project_profile
+from tracebridge.project_profile import load_project_profile, select_project_service
+from tracebridge.project_registry import list_profiles
+from tracebridge.project_registration_ui import render_registration
 from tracebridge.project_sources import agolive_repo_path, validate_agolive_repo
 from tracebridge.report_service import auto_prepare_submission, follow_up_service as follow_up_submission, prepare_submission, preparation_blockers
 from tracebridge.change_worker import persist_change_result
 from tracebridge.change_policy import WORKSPACE, safe_path
 from tracebridge.seed_project import capture_seed_action
+from tracebridge.project_health import inspect_project
+from tracebridge.project_repair_ui import render_repair_registration, project_repair_blockers, candidate_diff
 
 
 st.set_page_config(page_title="제보 에이전트", page_icon="🔎", layout="wide")
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 st.title("제보 에이전트")
 st.caption("증상을 한 줄로 적거나 사진만 첨부해도 됩니다. 화면·동작·대략적인 시각을 단서로 조사합니다.")
+render_registration(st)
 profiles = ["Agolive", "등록된 개발 가입 사례 (씨드)"]
 configured_profile = None
-if profile_path := os.getenv("TRACEBRIDGE_PROJECT_PROFILE"):
+registered_profiles, registration_errors = list_profiles()
+custom_profiles = {item.project_id + " (등록 프로젝트)": item for item in registered_profiles}
+if registration_errors:
+    st.sidebar.warning("연결 설정을 읽지 못한 프로젝트: " + ", ".join(registration_errors))
+if profile_path := st.session_state.get("registered_profile_path") or os.getenv("TRACEBRIDGE_PROJECT_PROFILE"):
     try:
         configured_profile = load_project_profile(profile_path)
-        profiles.append(configured_profile.project_id + " (등록 프로젝트)")
+        custom_profiles.setdefault(configured_profile.project_id + " (등록 프로젝트)", configured_profile)
     except (OSError, ValueError):
         st.error("등록 프로젝트 설정을 읽지 못했습니다. 관리자에게 연결 설정 확인을 요청해 주세요.")
         st.stop()
+profiles.extend(custom_profiles)
 default_seed = os.getenv("TRACEBRIDGE_SERVICE_PROJECT", "seed" if not os.getenv("TRACEBRIDGE_AGOLIVE_REPO") and not os.getenv("TRACEBRIDGE_EVENTS_FILE") else "agolive") == "seed"
-profile = st.selectbox("연결된 프로젝트", profiles, index=2 if configured_profile else 1 if default_seed else 0, key="report_project")
+selected_index = profiles.index(configured_profile.project_id + " (등록 프로젝트)") if configured_profile else 1 if default_seed else 0
+profile = st.selectbox("연결된 프로젝트", profiles, index=selected_index, key="report_project")
 seed = profile == profiles[1]
-custom_project = bool(configured_profile and profile == profiles[2])
-if st.session_state.get("active_report_project") != profile:
-    st.session_state.active_report_project = profile
+custom_project = profile in custom_profiles
+if custom_project:
+    configured_profile = custom_profiles[profile]
+    selected_service = st.selectbox("조사할 서비스", [item.id for item in configured_profile.services] or [configured_profile.service], key="report_service")
+    selected_repair_policy = st.selectbox("수정·검사 정책", list(configured_profile.policy_refs), key="report_repair_policy") if configured_profile.policy_refs else None
+    render_repair_registration(st, configured_profile)
+    with st.expander("프로젝트 연결 상태"):
+        if st.button("코드·로그·버전 연결 확인", key="project_doctor"):
+            st.session_state.project_health = inspect_project(configured_profile)
+        health = st.session_state.get("project_health")
+        if health and health.get("project_id") == configured_profile.project_id:
+            st.write("연결 상태:", health["status"])
+            st.table([{key: item[key] for key in ("id", "log_status", "contract_status", "runtime_version_status")} for item in health["services"]])
+            st.json(health)
+active_binding = profile + ("/" + selected_service if custom_project else "")
+if st.session_state.get("active_report_project") != active_binding:
+    st.session_state.active_report_project = active_binding
     st.session_state.report_agent_result = None
     st.session_state.report_agent_change = None
     st.session_state.use_nvidia_analysis = False
     st.session_state.automatic_seed_change = False
     st.session_state.seed_action = None
+    st.session_state.project_application = None
 repo = None
 if seed:
     st.caption("통제된 개발 씨드 사례입니다. 가입 동작과 별도 사본의 수정안을 검증하며 원본 적용은 검토 대기로 남깁니다.")
@@ -77,7 +103,7 @@ options = {"repo": repo, "use_nvidia": use_nvidia, "include_docker_logs": includ
 if seed:
     options = {"registered_seed": True, "use_nvidia": use_nvidia}
 elif custom_project:
-    options = {"project_profile": configured_profile, "use_nvidia": use_nvidia}
+    options = {"project_profile": select_project_service(configured_profile, selected_service), "use_nvidia": use_nvidia}
 options.update(memory_enabled=memory_enabled, db_path=db_location())
 if metrics_dir := os.getenv("TRACEBRIDGE_METRICS_DIR"):
     options["observer_output_dir"] = Path(metrics_dir)
@@ -85,6 +111,9 @@ if metrics_dir := os.getenv("TRACEBRIDGE_METRICS_DIR"):
 
 def save_active(new_result):
     st.session_state.report_agent_result = new_result
+    if custom_project:
+        st.session_state.report_agent_change = None
+        st.session_state.project_application = None
     try:
         prepared = auto_prepare_submission(new_result, enabled=automatic, live=use_nvidia)
     except (ValueError, RuntimeError, OSError, sqlite3.Error):
@@ -105,7 +134,7 @@ if st.button("조사 시작", type="primary", key="start_report"):
     st.session_state.report_agent_result = None
     st.session_state.report_agent_change = None
     try:
-        context = ReportContext(environment=environment).with_answer(occurred)
+        context = ReportContext(environment=environment, service=selected_service if custom_project else None).with_answer(occurred)
         with st.spinner("제보와 현재 관측을 대조하고 있습니다..."):
             new_result = investigate_submission(text, image=image, context=context, **options)
         save_active(new_result)
@@ -183,8 +212,13 @@ if result:
         submitted = st.form_submit_button("같은 사건에 답변 반영", key="reply_report")
     if submitted:
         try:
+            anchor = result
+            active_change = st.session_state.get("report_agent_change")
+            if (active_change and active_change.get("persistence", {}).get("status") in {"SAVED", "ALREADY_SAVED"}
+                    and active_change.get("run", {}).get("revision", 0) > result.get("revision", 0)):
+                anchor = active_change["run"]
             with st.spinner("답변을 반영해 같은 사건의 현재 관측을 다시 확인합니다..."):
-                updated = follow_up_submission(result, answer, **options)
+                updated = follow_up_submission(anchor, answer, **options)
             save_active(updated)
             st.rerun()
         except (ValueError, RuntimeError) as exc:
@@ -202,11 +236,24 @@ if result:
                 st.rerun()
             except (ValueError, RuntimeError, sqlite3.Error):
                 st.error("수정안을 준비하지 못했습니다. 저장 상태와 개발 정책을 확인해 주세요.")
+    if custom_project and not st.session_state.get("report_agent_change"):
+        blockers = project_repair_blockers(result, configured_profile, selected_repair_policy)
+        for blocker in blockers:
+            st.caption("수정 후보 준비 대기: " + blocker)
+        if st.button("등록 프로젝트 수정 후보 검증", disabled=bool(blockers) or not use_nvidia, key="prepare_project_change"):
+            try:
+                with st.spinner("별도 사본에서 등록된 재현·수정 전후·회귀 검사를 실행합니다..."):
+                    st.session_state.report_agent_change = prepare_submission(result, project_profile=configured_profile, policy_id=selected_repair_policy, live=True)
+                st.rerun()
+            except (ValueError, OSError, RuntimeError, sqlite3.Error) as exc:
+                st.error(str(exc))
     prepared = st.session_state.get("report_agent_change")
     if prepared:
         job = prepared["job"]
-        st.subheader("수정안 · 검토 대기")
-        st.write(f"{job['status']} / {job['review_status']}")
+        applied_already = (result.get("change", {}).get("work_id") == job["work_id"]
+            and result.get("change", {}).get("original_applied") is True)
+        st.subheader("수정안 · 원본 적용 완료" if applied_already else "수정안 · 검토 대기")
+        st.write("APPLIED · 후보 검사 통과" if applied_already else f"{job['status']} / {job['review_status']}")
         if job["candidate_fix_verified"]:
             st.success("별도 사본에서 수정 전 실패 → 수정 후 통과 및 회귀 통과를 확인했습니다.")
         else:
@@ -214,16 +261,41 @@ if result:
         st.table([{key: check.get(key) for key in ("phase", "status", "exit_code", "elapsed_ms")} for check in job["checks"]])
         if job["diff"].get("ref"):
             try:
-                path = safe_path(WORKSPACE, job["diff"]["ref"], file=True)
-                if path.stat().st_size <= 4096:
-                    st.code(path.read_text(encoding="utf-8"), language="diff")
+                if custom_project:
+                    st.code(candidate_diff(job), language="diff")
+                else:
+                    path = safe_path(WORKSPACE, job["diff"]["ref"], file=True)
+                    if path.stat().st_size <= 4096:
+                        st.code(path.read_text(encoding="utf-8"), language="diff")
             except (OSError, ValueError):
                 st.warning("후보 diff 파일을 조회하지 못했습니다.")
-        st.caption("후보 검증은 등록된 씨드 사본 한정입니다. 원본 적용·배포·서비스 회복은 미실행입니다.")
+        st.caption("후보 검증은 등록된 프로젝트 사본 한정입니다. 원본 적용·배포·서비스 회복은 별도입니다.")
+        for limitation in job.get("limitations", []):
+            st.caption(limitation)
+        if custom_project and job["candidate_fix_verified"] and not applied_already:
+            reviewed = st.checkbox("diff와 검사 결과를 검토했고 이 후보를 원본에 적용합니다",
+                key="review_project_diff_" + job["work_id"] + "_" + job["diff"]["sha256"][:16])
+            if st.button("검토한 후보 원본 적용", disabled=not reviewed, key="apply_project_change"):
+                try:
+                    from tracebridge.project_repair import apply_project_change
+                    applied = apply_project_change(result["project_id"], job["work_id"], configured_profile,
+                        expected_diff_sha256=job["diff"]["sha256"], db_path=db_location())
+                    st.session_state.project_application = applied
+                    if applied.get("persistence", {}).get("status") in {"SAVED", "ALREADY_SAVED"}:
+                        st.session_state.report_agent_result = {**applied["run"], "persistence": applied["persistence"]}
+                    st.rerun()
+                except (OSError, ValueError, RuntimeError) as exc:
+                    st.error(str(exc))
+        if applied_already:
+            st.info("원본 적용 상태: APPLIED · 서비스 재기동/회복 확인은 별도입니다.")
         if prepared.get("persistence", {}).get("status") == "FAILED":
             st.warning("작업 기록 저장에 실패했습니다. 확보한 결과의 저장만 재시도할 수 있습니다.")
             if st.button("작업 결과 저장만 재시도", key="retry_change_save"):
-                st.session_state.report_agent_change = persist_change_result(prepared, db_location())
+                if custom_project:
+                    from tracebridge.project_repair import persist_project_change
+                    st.session_state.report_agent_change = persist_project_change(prepared, db_location())
+                else:
+                    st.session_state.report_agent_change = persist_change_result(prepared, db_location())
                 st.rerun()
 
     with st.expander("내부 검토 · 사건 기억"):
@@ -258,7 +330,7 @@ if result:
         st.write(f"이 접수·조사의 모델 호출: {result['model_calls']}회 · 사용량: {result['usage']}")
         if prepared:
             st.write("수정 제안의 모델 호출:", prepared["job"]["model"]["actual_calls"], "회 · 사용량:", prepared["job"]["model"].get("usage", {}))
-        st.dataframe(result["steps"], hide_index=True, use_container_width=True)
+        st.dataframe(result["steps"], hide_index=True, width="stretch")
         st.json(result["observations"])
         st.json(result["report_clues"])
         st.json(result["evidence"])
@@ -267,7 +339,7 @@ if result:
         st.write("다음 조치:", result["next_steps"])
         for note in result["notes"]:
             st.write(note)
-        if result["history"]:
+        if result.get("history"):
             st.json(result["history"])
     st.caption("작업 후보·검토 승인·COMPLETED는 원인 확정·수정 검증이 아닙니다. 사건 기억과 후보 검증은 현재 근거·원본 적용 상태와 별도로 기록합니다.")
 

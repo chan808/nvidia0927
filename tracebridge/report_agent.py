@@ -23,7 +23,7 @@ from .deadline import DeadlineExceeded, check_deadline, remaining_timeout
 from .incident_memory import IncidentStore, current_signals, persist_result, recheck_memory, search_memory, signals_from_text
 from .project_gpt import ProposedReport
 from .project_investigation import _checked_hypotheses
-from .project_profile import ProjectProfile, load_project_profile, read_project_logs, observe_project_version
+from .project_profile import ProjectProfile, load_project_profile, read_project_logs, observe_project_version, select_project_service
 from .evidence import EvidenceError, ProjectEvidenceSource
 from .report_contract import KST, ReportContext, action_preference, empty_result, plain_questions
 from .report_intake import LocalEventCatalog, ObservedEventCatalog, selected_catalog_conflicts, triage_report
@@ -62,6 +62,21 @@ class LogArgs(BaseModel):
 
 class EmptyArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    purpose: str = Field(default="", max_length=160)
+
+
+class FileListArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    terms: list[str] = Field(default_factory=list, max_length=8)
+    purpose: str = Field(default="", max_length=160)
+
+
+class ReadCodeArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    repository_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    path: str = Field(min_length=1, max_length=240)
+    start_line: int = Field(default=1, ge=1, le=100_000)
+    max_lines: int = Field(default=80, ge=1, le=100)
     purpose: str = Field(default="", max_length=160)
 
 
@@ -114,7 +129,8 @@ class PhotoObservation(BaseModel):
     has_app_screen: bool
 
 
-TOOL_ARGS = {"search_code": SearchArgs, "find_logs": LogArgs, "get_version": EmptyArgs, "get_contract": EmptyArgs}
+TOOL_ARGS = {"search_code": SearchArgs, "find_logs": LogArgs, "get_version": EmptyArgs, "get_contract": EmptyArgs,
+             "list_code_files": FileListArgs, "read_code": ReadCodeArgs}
 TOOL_SCHEMAS = [
     {"type": "function", "function": {"name": name, "description": description, "parameters": TOOL_ARGS[name].model_json_schema()}}
     for name, description in (
@@ -122,6 +138,8 @@ TOOL_SCHEMAS = [
         ("find_logs", "Read selected recent registered local logs. Without the submitted request ID, returned logs are candidates, not the same incident."),
         ("get_version", "Distinguish local HEAD, manually configured SHA and a revision label observed on an allowed running container. No unknown/configured SHA proves running code."),
         ("get_contract", "Read registered OpenAPI/DTO/caller evidence for the currently selected observed request. Missing contracts and versions stay unobserved. No supplied IDs, paths or execution permissions."),
+        ("list_code_files", "List bounded relative source file names in registered repositories. Use English operation or class name terms to navigate unfamiliar code. File names are not causal evidence."),
+        ("read_code", "Read a bounded excerpt of a registered source file selected from list_code_files. Only repository ID and relative source path are allowed; no secret files or execution."),
     )
 ]
 def _hosted_final_schema() -> dict:
@@ -234,7 +252,7 @@ def _profile_binding(profile: ProjectProfile | None, deadline: float | None) -> 
         if len(raw) > 64_000:
             raise ValueError("프로젝트 설정 크기 한도에 도달했습니다")
         digest = hashlib.sha256(raw).hexdigest()
-    return {
+    result = {
         "config": str(profile.config_path) if profile.config_path else None, "sha256": digest,
         "code_roots": [str(path) for path in profile.code_roots],
         "log_sources": [{"id": item.id, "path": str(item.path), "format": item.format} for item in profile.log_sources],
@@ -242,6 +260,13 @@ def _profile_binding(profile: ProjectProfile | None, deadline: float | None) -> 
         "version": {"method": profile.version_observation.method, "path": str(profile.version_observation.path), "field": profile.version_observation.field},
         "policy_refs": list(profile.policy_refs),
     }
+    if profile.repositories:
+        result["repositories"] = [{"id": item.id, "service": item.service, "root": str(item.root),
+                                   "code_roots": [str(path) for path in item.code_roots]} for item in profile.repositories]
+    for source, entry in zip(profile.log_sources, result["log_sources"]):
+        if source.timezone:
+            entry["timezone"] = source.timezone
+    return result
 
 
 class ProjectTools:
@@ -257,6 +282,7 @@ class ProjectTools:
         self.selected_source = None
         self.selected_trace_id = None
         self.source_loaders = {}
+        self.source_metadata = {}
         self.registration = registered_log_scope if registered_log_scope is not None else {
             key: os.getenv(name) for key, name in (("service", "TRACEBRIDGE_LOG_SERVICE"), ("environment", "TRACEBRIDGE_LOG_ENVIRONMENT"), ("timezone", "TRACEBRIDGE_LOG_TIMEZONE")) if os.getenv(name)
         }
@@ -264,7 +290,7 @@ class ProjectTools:
             raise ValueError("등록 로그 범위는 서비스·환경·시간대의 짧은 설정만 허용합니다")
         self.registration = {**self.registration, "project_id": project_id}
         self.context = context or ReportContext()
-        self.context = replace(self.context, service=canonical_service(self.context.service or self.registration.get("service")), environment=self.context.environment or self.registration.get("environment"))
+        self.context = replace(self.context, service=(self.context.service or self.registration.get("service")) if profile else canonical_service(self.context.service or self.registration.get("service")), environment=self.context.environment or self.registration.get("environment"))
         self.evidence = []
         self.notes: list[str] = []
         self.failures: list[str] = []
@@ -279,6 +305,7 @@ class ProjectTools:
                     "project_id": profile.project_id, "service": profile.service, "environment": profile.environment,
                     "code_roots": [path.relative_to(profile.root).as_posix() for path in profile.code_roots],
                     "contract_registered": profile.openapi_path is not None, "execution_authorized": False,
+                    "repositories": [{"id": item.id, "service": item.service} for item in profile.repositories],
                 }, ensure_ascii=False))]
                 self.revision = repository_revision(repo, deadline=deadline)
                 self.dirty = source_tree_dirty(repo, deadline=deadline)
@@ -321,6 +348,8 @@ class ProjectTools:
                 source = "profile:" + entry.id
                 sources.append(source)
                 self.source_loaders[source] = lambda entry=entry: self._profile_log_stream(entry)
+                self.source_metadata[source] = {**self.registration, "exact_service_ids": True,
+                    **({"service": entry.service} if entry.service else {}), **({"timezone": entry.timezone} if entry.timezone else {})}
             if not sources:
                 self.log_scope.append({"source": "registered-project-profile", "complete": False,
                                        "available": False, "reasons": ["no_registered_log_source"]})
@@ -328,6 +357,7 @@ class ProjectTools:
             try:
                 check_deadline(self.deadline)
                 metadata = self.registration if source != "provided-log" else {"project_id": self.project_id}
+                metadata = self.source_metadata.get(source, metadata)
                 if source == "registered-log":
                     text = file_log_stream(self.log_file, deadline=self.deadline)
                 elif source == "provided-log":
@@ -358,10 +388,10 @@ class ProjectTools:
 
     def _profile_log_stream(self, entry):
         check_deadline(self.deadline)
-        if not entry.path.resolve().is_relative_to(self.profile.root.resolve()):
+        if not entry.path.resolve().is_relative_to((entry.root or self.profile.root).resolve()):
             raise ValueError("등록 로그 경로가 프로젝트 범위를 벗어났습니다")
-        if entry.format == "jsonl":
-            return file_log_stream(entry.path, deadline=self.deadline, registered_format="jsonl")
+        if entry.format in {"jsonl", "text"}:
+            return file_log_stream(entry.path, deadline=self.deadline, registered_format=entry.format)
         # B's public bounded JSON reader preserves its own completeness. The
         # adapter never turns a partial JSON source into a complete JSONL stream.
         collected = read_project_logs(replace(self.profile, log_sources=(entry,)))
@@ -435,7 +465,7 @@ class ProjectTools:
             if item.kind == "code" and count >= 6 or item.kind == "log" and count >= 20 or item.kind == "contract" and count >= 3:
                 continue
             prefix = {"code": "C", "log": "L", "version": "V", "contract": "K"}[item.kind]
-            current = replace(item, id=f"{prefix}{count + 1}", source_revision=self.revision if item.kind == "code" else item.source_revision)
+            current = replace(item, id=f"{prefix}{count + 1}", source_revision=(item.source_revision or self.revision) if item.kind == "code" else item.source_revision)
             self.evidence.append(current)
             result.append(current.to_dict())
         return result
@@ -445,6 +475,48 @@ class ProjectTools:
         if name not in TOOL_ARGS:
             raise ValueError("등록되지 않은 도구입니다")
         parsed = TOOL_ARGS[name].model_validate_json(arguments)
+        if name in {"list_code_files", "read_code"}:
+            if not self.profile:
+                raise ValueError("등록 프로젝트에서만 파일 탐색을 지원합니다")
+            from .project_sources import _source_files, SOURCE_SUFFIXES, MAX_FILE_BYTES
+            from .project_repair import _checked_path, _protected
+            roots = {item.id: (item.root, item.code_roots, item.service) for item in self.profile.repositories}
+            if self.profile.code_roots:
+                roots["primary"] = (self.profile.root, self.profile.code_roots, self.profile.service)
+            if name == "list_code_files":
+                terms = [value.casefold() for value in parsed.terms if 2 <= len(value) <= 80]
+                files = []
+                truncated = False
+                for id_, (root, directories, service) in roots.items():
+                    count = 0
+                    for path in _source_files(root, deadline=self.deadline, code_roots=directories):
+                        relative = path.relative_to(root).as_posix()
+                        if _protected(relative) or terms and not any(term in relative.casefold() for term in terms):
+                            continue
+                        if count >= 20 or len(files) >= 64:
+                            truncated = True
+                            break
+                        files.append({"repository_id": id_, "path": relative, "service": service})
+                        count += 1
+                return {"files": files, "truncated": truncated, "evidence": [], "notes": ["파일 목록은 원인 확정 근거가 아닙니다"]}
+            if parsed.repository_id not in roots:
+                raise ValueError("등록된 코드 저장소 ID가 아닙니다")
+            root, directories, service = roots[parsed.repository_id]
+            repository = next((item for item in self.profile.repositories if item.id == parsed.repository_id), None)
+            metadata_root = repository.git_root if repository and repository.git_root else root
+            path = _checked_path(root, parsed.path)
+            if _protected(parsed.path) or path.suffix not in SOURCE_SUFFIXES or not any(path.is_relative_to(value.resolve()) for value in directories):
+                raise ValueError("등록된 코드 하위 경로만 읽을 수 있습니다")
+            with path.open("rb") as stream:
+                raw = stream.read(MAX_FILE_BYTES + 1)
+            if len(raw) > MAX_FILE_BYTES:
+                raise ValueError("코드 파일 크기 한도를 초과했습니다")
+            lines = raw.decode("utf-8", errors="replace").splitlines()
+            start = parsed.start_line - 1
+            content = "\n".join(f"{number + 1}: {line[:1000]}" for number, line in enumerate(lines[start:start + parsed.max_lines], start))
+            return {"evidence": self._add([Evidence("C1", "code", f"repository:{parsed.repository_id}/{parsed.path}:{parsed.start_line}",
+                redact(content)[:6000], service=service, repository_id=parsed.repository_id,
+                source_revision=repository_revision(metadata_root, deadline=self.deadline), source_tree_dirty=source_tree_dirty(metadata_root, deadline=self.deadline, code_roots=directories))]), "notes": []}
         if name == "get_version":
             if not self.version_checked:
                 if self.profile:
@@ -485,9 +557,9 @@ class ProjectTools:
                 if any(not isinstance(service, str) or not 1 <= len(service) <= 80 for service in parsed.services):
                     raise ValueError("조회 서비스 이름을 확인해 주세요")
                 items = code_evidence(self.repo, terms, parsed.services, deadline=self.deadline,
-                                      **({"code_roots": self.profile.code_roots} if self.profile else {}))[:3]
+                                      **({"code_roots": self.profile.code_roots, "repositories": self.profile.repositories} if self.profile else {}))[:3]
                 if self.profile:
-                    items = [replace(item, service=self.profile.service) for item in items]
+                    items = [replace(item, service=self.profile.service) if not item.repository_id else item for item in items]
             return {"evidence": self._add(items), "notes": []}
         already_loaded = self.log_inputs is not None
         self._load_logs()
@@ -548,8 +620,12 @@ def _checked_current_hypotheses(proposal: Conclusion | None, tools: ProjectTools
         support = [by_id[id_] for id_ in item["supporting_evidence_ids"]]
         current_log = any(e.kind == "log" and e.correlated and e.scope_status == "VERIFIED" and e.trace_id == result["trace_id"] for e in support)
         code = any(e.kind == "code" for e in support)
+        separate_repository = any(e.kind == "code" and e.repository_id for e in support)
         item["limitations"] = []
-        if tools.versions()["comparison"] == "MISMATCH" and code:
+        if separate_repository:
+            item["status"] = "LOG_CANDIDATE" if any(e.kind == "log" for e in support) else "OBSERVATION_CANDIDATE" if any(e.kind == "rule_observation" for e in support) else "CODE_ONLY"
+            item["limitations"].append("분리된 저장소 각각의 실행 버전과 배포 대응은 확인되지 않았습니다")
+        elif tools.versions()["comparison"] == "MISMATCH" and code:
             item["status"] = "CONTESTED_HYPOTHESIS"
             item["limitations"].append("로컬 코드와 실행 서비스의 관측 SHA가 다릅니다")
         elif code and (tools.versions()["comparison"] != "MATCH" or tools.dirty is not False):
@@ -614,10 +690,15 @@ def investigate_submission(
     memory_enabled: bool = True,
     observer=None,
     observer_output_dir: str | Path | None = None,
+    message_received_at: str | None = None,
+    run_id: str | None = None,
+    incident_id: str | None = None,
+    memory_lookup=None,
 ) -> dict:
     """Checked investigation, reviewed historical clues, then best-effort local persistence."""
     started_run = time.monotonic()
-    received = datetime.now(timezone.utc)
+    from .report_contract import event_time
+    received = event_time(message_received_at).astimezone(timezone.utc) if message_received_at else datetime.now(timezone.utc)
     message_received_at = received.isoformat()
     relative_date_basis = {"date": received.astimezone(KST).date().isoformat(), "timezone": "+09:00"}
     if not isinstance(text, str) or len(text) > 4000 or not text.strip() and not image and not previous_result:
@@ -627,8 +708,10 @@ def investigate_submission(
     deadline = started_run + max_seconds
     if type(memory_enabled) is not bool:
         raise ValueError("기억 검색 선택은 bool이어야 합니다")
-    run_id = observer.run_id if observer is not None else uuid4().hex
-    incident_id = previous_result["incident_id"] if previous_result else uuid4().hex
+    run_id = observer.run_id if observer is not None else run_id or uuid4().hex
+    incident_id = previous_result["incident_id"] if previous_result else incident_id or uuid4().hex
+    if not all(re.fullmatch(r"[A-Za-z0-9_-]{1,128}", value) for value in (run_id, incident_id)):
+        raise ValueError("조사/사건 ID 형식이 올바르지 않습니다")
     if observer is not None and observer_output_dir is not None:
         raise ValueError("계측 객체와 계측 출력 경로 중 하나만 지정해 주세요")
     if observer_output_dir is not None:
@@ -641,6 +724,10 @@ def investigate_submission(
     profile = load_project_profile(profile_value) if isinstance(profile_value, (str, Path)) else profile_value
     if profile is not None and not isinstance(profile, ProjectProfile):
         raise ValueError("등록된 프로젝트 설정을 선택해 주세요")
+    if profile:
+        profile = select_project_service(profile, context.service if context and context.service else None)
+        if context and context.environment and context.environment != profile.environment:
+            raise ValueError("제보 환경과 등록 프로젝트 환경이 다릅니다. 해당 환경의 연결을 선택해 주세요")
     if registered_seed:
         from .seed_project import registered_seed as seed_registration, seed_catalog
         from .change_policy import WORKSPACE, safe_path
@@ -706,6 +793,8 @@ def investigate_submission(
     session["action_preference"] = action_preference(text) or session.get("action_preference", "UNSPECIFIED")
     # Keep the incident's first receipt immutable; relative dates belong to this message.
     base_context = base_context.with_answer(text, received_at=message_received_at)
+    if profile and base_context.environment and base_context.environment != profile.environment:
+        raise ValueError("제보 환경과 등록 프로젝트 환경이 다릅니다. 해당 환경의 연결을 선택해 주세요")
     report = "\n".join([session["text"], *session["answers"]]).strip()
     if len(report) > 10000:
         raise ValueError("같은 사건의 제보와 후속 답변은 총 10000자까지 가능합니다")
@@ -729,7 +818,7 @@ def investigate_submission(
     key, model, model_client = None, DEFAULT_MODEL, None
     data_url, image_hash, visible = None, None, ""
     if use_nvidia and image:
-        key, model = nvidia_settings()
+        key, model = (None, getattr(client, "model", DEFAULT_MODEL)) if client else nvidia_settings()
     if image:
         data_url, image_hash = prepare_image(image)
         if use_nvidia and (key or ocr):
@@ -867,6 +956,16 @@ def investigate_submission(
             held["version_provenance"] = decision["version_provenance"]
             held["summary"] = held["route_reason"] = "사건 목록과 현재 로그가 같은 요청에 대해 서로 다른 관측을 담고 있어 판정을 보류합니다." if tools.catalog_conflicts else "등록 로그의 관측이 충돌하거나 일부를 확인하지 못해 사건 목록의 판정을 보류합니다."
             decision = held
+        if (profile and not profile.log_sources and not catalog
+                and not (log_file or _has_provided_source(provided_logs) or include_docker_logs)
+                and decision["route"] == "REQUEST_CONTEXT"):
+            reason = "이 서비스에 로그 파일이 등록되지 않아 실제 요청과 증상을 확인하지 못했습니다. 로그를 연결하거나 등록된 재현 검사로 확인해 주세요. 코드 조회 결과는 조사 기록에 보존합니다."
+            decision.update(summary=reason, route_reason=reason, next_action=reason)
+        elif (decision["route"] == "REQUEST_CONTEXT" and not catalog and tools.log_inputs
+                and not tools.context.occurred_at
+                and set(tools.collection_scope()["aggregate"].get("incomplete_reasons", [])) == {"matching_scope_unverified"}):
+            reason = "로그는 조회했지만 제보의 발생 시각이 없어 같은 요청의 관측 범위를 확인하지 못했습니다. 문제가 발생한 대략적인 시각과 환경을 알려주세요."
+            decision.update(summary=reason, route_reason=reason, next_action=reason)
         return decision
 
     if report.strip() and (log_file or _has_provided_source(provided_logs) or include_docker_logs or profile):
@@ -875,13 +974,15 @@ def investigate_submission(
         tools._load_logs() if report.strip() else None
     result = rule_result()
     fast = result["route"] in {"GUIDANCE", "WORK_CANDIDATE"}
+    if profile and report.strip() and (not use_nvidia or fast):
+        read_tool("search_code", {"terms": report_terms(report)[:8] or ["unknown"]}, phase="project_source")
     waiting_for_selection = result["correlation"] == "CONTEXT_CANDIDATE" and result["finding_status"] in {"CONFIRMED_MISMATCH", "OBSERVED_VALIDATION"}
     if result.get("scope"):
-        tools.context = replace(tools.context, service=tools.context.service or canonical_service(result["scope"].get("service")), environment=tools.context.environment or result["scope"].get("environment"))
+        tools.context = replace(tools.context, service=tools.context.service or (result["scope"].get("service") if profile else canonical_service(result["scope"].get("service"))), environment=tools.context.environment or result["scope"].get("environment"))
 
     if not fast and not waiting_for_selection and use_nvidia and time.monotonic() < deadline:
         if not image:
-            key, model = nvidia_settings()
+            key, model = (None, getattr(client, "model", DEFAULT_MODEL)) if client else nvidia_settings()
         try:
             check_deadline(deadline)
             model_client = client or (OpenAI(api_key=key, base_url="https://integrate.api.nvidia.com/v1", timeout=remaining_timeout(deadline, 45.0), max_retries=0) if key else None)
@@ -954,7 +1055,13 @@ def investigate_submission(
         }
         observed_signals, reported_signals = current_signals(memory_current), signals_from_text(report)
         search_signals = {key: list(dict.fromkeys([*observed_signals[key], *reported_signals[key]]))[:8] for key in observed_signals}
-        memory_search = search_memory(project_id, report[:12000], signals=search_signals, exclude_incident_id=result["incident_id"], db_path=db_path, enabled=memory_enabled)
+        if memory_lookup:
+            try:
+                memory_search = memory_lookup(project_id, report[:12000], signals=search_signals, exclude_incident_id=result["incident_id"], enabled=True)
+            except Exception as exc:
+                memory_search = {"status": "FAILED", "hit_count": 0, "cards": [], "error_type": type(exc).__name__}
+        else:
+            memory_search = search_memory(project_id, report[:12000], signals=search_signals, exclude_incident_id=result["incident_id"], db_path=db_path, enabled=memory_enabled)
         memory_search = recheck_memory(memory_search, memory_current)
     else:
         memory_search = {"status": "SKIPPED_TIME_BUDGET", "hit_count": 0, "cards": [], "elapsed_ms": 0}
@@ -981,7 +1088,8 @@ def investigate_submission(
                 kwargs = {"model": model, "messages": messages, "temperature": 0.2, "max_tokens": 900, "stream": False, "extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
                 if not final_round:
                     available = [schema for schema in TOOL_SCHEMAS
-                                 if schema["function"]["name"] != "get_version" or not tools.version_checked]
+                                  if (schema["function"]["name"] != "get_version" or not tools.version_checked)
+                                  and (profile or schema["function"]["name"] not in {"list_code_files", "read_code"})]
                     kwargs.update(tools=[*available, FINISH_TOOL], tool_choice="auto")
                 else:
                     kwargs["messages"] = [
@@ -1130,6 +1238,9 @@ def investigate_submission(
         if result["correlation"] == "EXACT_ID":
             result["correlation_basis"] = "explicit candidate selection, re-read within the same project/time/environment scope"
     result["session"] = {**session, "context": tools.context.to_dict(), "source_binding": binding_id, "input_modes": modes}
+    if profile:
+        result["source_registration"] = {"profile_sha256": _profile_binding(profile, None).get("sha256"), "service": profile.service,
+            "environment": profile.environment, "repository_ids": [item.id for item in profile.repositories]}
     if seed_policy:
         result.update(case_kind=seed_policy.case_kind, development_target={"target_id": seed_policy.target_id,
                       "snapshot_sha256": seed_policy.snapshot_sha256, "source_origin": seed_policy.source_origin})

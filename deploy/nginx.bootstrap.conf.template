@@ -1,0 +1,14 @@
+# Replace __DOMAIN__ with your chosen hostname before copying into conf.d.
+# Use this HTTP-only configuration until the new hostname certificate exists.
+server {
+    listen 80;
+    server_name __DOMAIN__;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 503;
+    }
+}

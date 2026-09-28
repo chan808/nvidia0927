@@ -1,0 +1,178 @@
+{
+  "recorded_at": "2026-09-28T17:01:26.766531+00:00",
+  "scope": "PRIVATE_OWNER_PILOT",
+  "regression": {
+    "command": "python -m pytest tests -q --basetemp output/verification-final-suite-binding",
+    "passed": 547,
+    "failed": 0,
+    "elapsed_seconds": 100.57,
+    "external_model_calls": 0
+  },
+  "daily": {
+    "project_id": "daily-local",
+    "repositories": [
+      "frontend",
+      "backend"
+    ],
+    "baseline_check_status": "BASELINE_PASSED",
+    "baseline_original_unchanged": true,
+    "baseline_snapshot_sha256": "e3b077f02cc6411cb20e085879c9a93229eaa008f34006a6f80e062d7df7acb5",
+    "vitest_files_passed": 24,
+    "vitest_tests_passed": 229,
+    "artifact": "output/daily-connection/checks.json",
+    "artifact_sha256": "f1208cac21dbc3e16d1e1f842f2be3e59cd8ed9416807bf617c22a848d90d261",
+    "actual_incident_repaired": false,
+    "source_edit_actions": 0,
+    "database_write_actions": 0,
+    "final_working_tree_observation": {
+      "changed": [
+        "frontend/next-env.d.ts"
+      ],
+      "action": "PRESERVED",
+      "generated_dev_type_paths": true
+    },
+    "persistent_logs_registered": false,
+    "runtime_sha_observed": false
+  },
+  "live_nvidia": {
+    "material": "PUBLIC_SYNTHETIC_PROJECT",
+    "final_status": "CHANGE_PREPARED",
+    "candidate_fix_verified": true,
+    "original_unchanged": true,
+    "final_model": {
+      "mode": "NVIDIA_GATEWAY",
+      "actual_calls": 1,
+      "test_double_calls": 0,
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "usage": {
+        "completion_tokens": 240,
+        "prompt_tokens": 1083,
+        "total_tokens": 1323,
+        "completion_tokens_details": null,
+        "prompt_tokens_details": null
+      },
+      "response_id": "chatcmpl-3773a09a-c3c1-41f4-8bbd-8f952709b35e"
+    },
+    "checks": [
+      {
+        "phase": "before",
+        "status": "FAILED",
+        "exit_code": 1
+      },
+      {
+        "phase": "after",
+        "status": "PASSED",
+        "exit_code": 0
+      },
+      {
+        "phase": "regression",
+        "status": "PASSED",
+        "exit_code": 0
+      }
+    ],
+    "preserved_attempts": [
+      {
+        "artifact": "output/daily-connection/nvidia-gateway-validation.json",
+        "status": "VERIFICATION_FAILED"
+      },
+      {
+        "artifact": "output/daily-connection/nvidia-gateway-validation-v2.json",
+        "status": "MODEL_FAILED"
+      },
+      {
+        "artifact": "output/daily-connection/nvidia-gateway-validation-v3.json",
+        "status": "CHANGE_PREPARED"
+      }
+    ],
+    "success_artifact_sha256": "75efc54837cd34ca54de7c03559f335b56f10a88a564f31196cc7e26bba5898a"
+  },
+  "local_http": {
+    "transport": "ACTUAL_LOOPBACK_HTTP",
+    "state": "SUCCEEDED",
+    "job_id": "01d96c7763a24e7ea3378f9ae6ae522e",
+    "correlation": "NEEDS_CONTEXT",
+    "vendor_calls": 0,
+    "connection_test_only": true,
+    "service_health": [
+      {
+        "service": "backend",
+        "url": "http://127.0.0.1:8081/actuator/health",
+        "status": 200,
+        "request_id_present": true
+      },
+      {
+        "service": "frontend",
+        "url": "http://127.0.0.1:3100",
+        "status": 200,
+        "request_id_present": false
+      },
+      {
+        "service": "api-proxy",
+        "url": "http://127.0.0.1:3100/api/v1/auth/capabilities",
+        "status": 200,
+        "request_id_present": true
+      }
+    ],
+    "artifact": "output/daily-connection/local-http-validation.json"
+  },
+  "ui": {
+    "local": {
+      "exceptions": 0,
+      "project": "daily-local (등록 프로젝트)"
+    },
+    "remote": {
+      "exceptions": 0,
+      "project": "daily-local",
+      "service_options": [
+        "backend",
+        "frontend"
+      ]
+    }
+  },
+  "deployment_config": {
+    "compose_config": "PASSED_WITH_SYNTHETIC_ENVIRONMENT",
+    "image_built": false,
+    "https_deployed": false
+  },
+  "running_local_endpoints": {
+    "web": "http://127.0.0.1:8502",
+    "api": "http://127.0.0.1:8765",
+    "paired_project": "daily-local"
+  },
+  "unverified_or_unimplemented": [
+    "public multiuser authentication",
+    "remote photo intake",
+    "actual HTTPS deployment",
+    "adversarial Docker isolation",
+    "daily live-request cause confirmation",
+    "automatic deployment or service recovery"
+  ],
+  "source_sha256": {
+    "app.py": "763c5a2881516c8f9270009ccebff29e968ec05c7aee8f904db4deec0b0f963e",
+    "pyproject.toml": "034402fcd4485fdd94922c907124cc3069da2856ecab6f57a5ac6afa9ef93091",
+    "pages/2_Report_Agent.py": "ee132e5866a2e4ebb146b346d96f6b24036cec058b48a24ae632ff048491aa79",
+    "pages/3_Remote_Projects.py": "3db9c6be73a4d5358441e4163349125140dab75b2d81b1a5b931c246254d9f54",
+    "tracebridge/project_profile.py": "8065e35550f8a72106e3c70254a3ec2b6be8da5644657ca8be0b144eb905ced9",
+    "tracebridge/project_sources.py": "88288a63e225877d12afbf2713551fa9af219c44f4e44e44824e9b7727383a1f",
+    "tracebridge/project_registry.py": "db176ead9231a404562d9aa10fc83ec3ab9f64a1940ed45af9b776f673378d64",
+    "tracebridge/project_health.py": "915e0096da4d16c7ac9015356c7f33d2bc529ef97e2b32d782bd4cefa099ed79",
+    "tracebridge/project_registration_ui.py": "a8b4028ed37f73ea735fd2ff7824d6d84e8c75537564f0fb7a312a46b2575391",
+    "tracebridge/project_repair_ui.py": "b7f50e6407516e80c263742349391d4a120a1549c9d718fa5eec6641300b8a6a",
+    "tracebridge/project_repair.py": "305c80350a57ede045e5c09de6f5541d2ef3b41caddbfb8216f8451cf742ed41",
+    "tracebridge/report_agent.py": "63b07544a9183b890d9a1d740c2ae7d0b1b9096e657a0041646fe871afdd5b4c",
+    "tracebridge/report_service.py": "98c7206b36998177a2b2545edbea5a63427747a053384060f5c36c9fa6e7d7ec",
+    "tracebridge/incident_memory.py": "75217866ee677556a8a2eb2bea6a85cd44ff25cbc84efcee6353fe1804de5da5",
+    "tracebridge/control_plane.py": "6855dd7719d14582f953b00b333cf9f82610187ce1a8db9f09554e59b438aff5",
+    "tracebridge/local_runner.py": "9003c23cc37f918e52c870f84ee06ee2e2a61cac1dcabc0572dff5420510b2f8",
+    "scripts/project_tools.py": "161a5f4cf8cd328e0ab945390ae42a826547676d8a683cd99b517d041fd1eae9",
+    "scripts/local_runner.py": "3dd7d339a4e1e00a31ef907be3040560e420117c65c5290efd05a6766ec03dad",
+    "scripts/serve_control.py": "809b05801495eae0cfc16da5f47be6728b39e2502ceb7037812af49b69e3c43f",
+    "scripts/investigate_report.py": "5c562598751383dc48f868397fdc481839cd4681a8af1f3a61e755776feb76f3",
+    "scripts/validate_project_repair.py": "75003ca3d5f50ac7b99c5faacf3306f94783bb1db1e5322a377eeb2ca8f24488",
+    "tests/test_registered_project_repair.py": "594b6b0111b8e179234114efff5d687b844a116f7a65b0af256efe667ae2c489",
+    "tests/test_control_plane.py": "dd823066e2c45103b243b5ee41a3daed76a66ac1e1ebbe059a3670642d9eb63b",
+    "deploy/control-plane.compose.yaml": "ee9dd9a00df940a4c21728f280574a6fab839c39587e22723034a461491a7d97",
+    "deploy/Caddyfile.control-plane": "008fcdac50a79f1df17c28e0eb68110ed008d2161275098af2f352aa83b53c1f",
+    "deploy/Dockerfile": "bf6a568877866662634b556e7f5fffe00d3d35618dd98d7aa186bd82dd55d98d"
+  }
+}

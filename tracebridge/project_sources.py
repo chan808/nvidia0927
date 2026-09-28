@@ -26,7 +26,7 @@ SOURCE_DIRS = (
     "agolive-agent",
     "frontend/src",
 )
-SOURCE_SUFFIXES = {".kt", ".java", ".go", ".py", ".ts", ".tsx"}
+SOURCE_SUFFIXES = {".kt", ".kts", ".java", ".go", ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue", ".svelte", ".rs", ".cs", ".sql"}
 SKIP_PARTS = {"node_modules", ".git", ".next", "dist", "build", "__pycache__", ".venv", "tests", "__tests__", "test"}
 MAX_FILE_BYTES = 300_000
 MAX_SOURCE_FILES = 1500
@@ -79,6 +79,8 @@ class Evidence:
     scope_checks: dict[str, str] = field(default_factory=dict)
     source_revision: str | None = None
     response_status: int | None = None
+    repository_id: str | None = None
+    source_tree_dirty: bool | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -103,8 +105,8 @@ class LogText(str):
 
 def file_log_stream(path: Path, *, deadline: float | None = None, registered_format: str | None = None) -> LogRead:
     check_deadline(deadline)
-    if registered_format not in {None, "jsonl"}:
-        raise ValueError("등록 로그 형식은 JSONL이어야 합니다")
+    if registered_format not in {None, "jsonl", "text"}:
+        raise ValueError("등록 스트리밍 로그 형식은 JSONL 또는 text여야 합니다")
     if path.is_symlink() or registered_format is None and path.suffix.lower() not in {".log", ".txt", ".jsonl"} or not path.is_file():
         raise ValueError("등록된 로그는 일반 .log/.txt/.jsonl 파일이어야 합니다")
     initial = path.stat()
@@ -309,12 +311,13 @@ def repository_revision(repo: Path, *, deadline: float | None = None) -> str:
     return result.stdout.strip() if result.returncode == 0 else "unknown"
 
 
-def source_tree_dirty(repo: Path, *, deadline: float | None = None) -> bool | None:
+def source_tree_dirty(repo: Path, *, deadline: float | None = None, code_roots: tuple[Path, ...] | None = None) -> bool | None:
     if repository_revision(repo, deadline=deadline) == "unknown":
         return None
     try:
+        directories = [str(path.relative_to(repo)) for path in code_roots] if code_roots is not None else SOURCE_DIRS
         result = subprocess.run(
-            ["git", "status", "--porcelain", "--", *SOURCE_DIRS],
+            ["git", "status", "--porcelain", "--", *directories],
             cwd=repo, capture_output=True, text=True, timeout=remaining_timeout(deadline, 8), check=False,
         )
     except DeadlineExceeded:
@@ -375,7 +378,7 @@ def _source_files(repo: Path, *, deadline: float | None = None, code_roots: tupl
 
 
 def code_evidence(repo: Path, terms: list[str], services: list[str] | None = None, *, deadline: float | None = None,
-                  code_roots: tuple[Path, ...] | None = None) -> list[Evidence]:
+                  code_roots: tuple[Path, ...] | None = None, repositories: tuple = ()) -> list[Evidence]:
     check_deadline(deadline)
     cleaned = [
         (term.strip().casefold(), term.strip().isupper() and "_" in term)
@@ -384,10 +387,22 @@ def code_evidence(repo: Path, terms: list[str], services: list[str] | None = Non
     if not cleaned:
         return []
     preferred = set(services or [])
-    hits: list[tuple[int, str, int, str, str]] = []
-    for path in _source_files(repo, deadline=deadline, code_roots=code_roots):
-        relative = path.relative_to(repo).as_posix()
-        service = "backend" if relative.startswith("backend/") else (
+    def locations():
+        seen = set()
+        for repository, root, directories in [(None, repo, code_roots), *[(item, item.root, item.code_roots) for item in repositories]]:
+            for path in _source_files(root, deadline=deadline, code_roots=directories):
+                canonical = path.resolve()
+                if canonical in seen:
+                    continue
+                if len(seen) >= MAX_SOURCE_FILES:
+                    return
+                seen.add(canonical)
+                yield repository, root, path
+
+    hits = []
+    for repository, root, path in locations():
+        relative = path.relative_to(root).as_posix()
+        service = repository.service if repository is not None else "backend" if relative.startswith("backend/") else (
             "realtime" if relative.startswith("realtime/") else (
                 "agent" if relative.startswith("agolive-agent/") else "frontend"
             )
@@ -412,13 +427,15 @@ def code_evidence(repo: Path, terms: list[str], services: list[str] | None = Non
             score += sum(2 for term, _ in cleaned if term in filename)
             score += 2 if service in preferred else 0
             score += 2 if any(word in lowered for word in ("throw", "error", "warn", "exception", "slog.")) else 0
-            hits.append((score, relative, line_number, line, service))
+            source = f"repository:{repository.id}/{relative}" if repository else relative
+            hits.append((score, source, line_number, line, service, path, repository))
     hits.sort(key=lambda hit: (-hit[0], hit[1], hit[2]))
     selected: list[Evidence] = []
     per_file: dict[str, int] = {}
     strong_found = bool(hits and hits[0][0] >= 10)
     weak_count = 0
-    for score, relative, line_number, _, service in hits:
+    versions = {}
+    for score, relative, line_number, _, service, path, repository in hits:
         if strong_found and score < 10 and weak_count >= 4:
             continue
         if per_file.get(relative, 0) >= 2:
@@ -426,7 +443,9 @@ def code_evidence(repo: Path, terms: list[str], services: list[str] | None = Non
         per_file[relative] = per_file.get(relative, 0) + 1
         try:
             check_deadline(deadline)
-            lines = (repo / relative).read_text(encoding="utf-8", errors="replace").splitlines()
+            if repository and not path.resolve().is_relative_to(repository.root.resolve()):
+                continue
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         except DeadlineExceeded:
             raise
         except OSError:
@@ -434,9 +453,16 @@ def code_evidence(repo: Path, terms: list[str], services: list[str] | None = Non
         start = max(1, line_number - 2)
         end = min(len(lines), line_number + 2)
         snippet = "\n".join(f"{number}: {lines[number - 1].strip()}" for number in range(start, end + 1))
+        if repository and repository.id not in versions:
+            metadata_root = repository.git_root or repository.root
+            versions[repository.id] = (repository_revision(metadata_root, deadline=deadline),
+                                      source_tree_dirty(metadata_root, deadline=deadline, code_roots=repository.code_roots))
         selected.append(Evidence(
             f"C{len(selected) + 1}", "code", f"{relative}:{line_number}",
             redact(snippet, mask_identity=False)[:800], service,
+            repository_id=repository.id if repository else None,
+            source_revision=versions[repository.id][0] if repository else None,
+            source_tree_dirty=versions[repository.id][1] if repository else None,
         ))
         if strong_found and score < 10:
             weak_count += 1
@@ -491,7 +517,7 @@ def _log_record(line: str, *, source_metadata: dict) -> tuple[dict, dict]:
     metadata = data.get("trace") if isinstance(data.get("trace"), dict) else data
     trace = {}
     for target, keys in {
-        "occurred_at": ("occurred_at", "timestamp", "event_at", "time", "ts"),
+        "occurred_at": ("occurred_at", "timestamp", "@timestamp", "event_at", "time", "ts"),
         "service": ("service", "service_name"), "environment": ("environment", "env"),
         "method": ("method",), "path": ("path",), "operation": ("operation",),
         "version": ("version", "git_sha", "service_version"), "code_version": ("code_version",),
@@ -529,7 +555,7 @@ def _log_record(line: str, *, source_metadata: dict) -> tuple[dict, dict]:
             name = re.sub(r"[-_]\d+$", "", name)
             if name in SERVICE_ALIASES or name in {"backend", "realtime", "agent", "frontend"}:
                 trace[key], provenance[key] = name, "DOCKER_PREFIX"
-    trace["service"] = canonical_service(trace.get("service"))
+    trace["service"] = trace.get("service") if source_metadata.get("exact_service_ids") else canonical_service(trace.get("service"))
     if isinstance(data.get("project_id"), str) and "project_id" not in trace:
         trace["project_id"] = data["project_id"][:200]
     if docker_time and not trace.get("occurred_at"):
@@ -641,10 +667,11 @@ def collect_scoped_logs(
             continue
         checks = {}
         checks["project"] = "MISMATCH" if trace.get("project_id") and source_metadata.get("project_id") and trace["project_id"] != source_metadata["project_id"] else "REGISTERED_SOURCE"
-        for key, expected in (("service", canonical_service(scope.service)), ("environment", scope.environment)):
+        normalize = (lambda value: value) if source_metadata.get("exact_service_ids") else canonical_service
+        for key, expected in (("service", normalize(scope.service)), ("environment", scope.environment)):
             actual = trace.get(key)
             registered = source_metadata.get(key)
-            registered = canonical_service(registered) if key == "service" else registered
+            registered = normalize(registered) if key == "service" else registered
             checks[key] = "NOT_OBSERVED" if not actual else ("MISMATCH" if expected and actual != expected or registered and actual != registered else provenance.get(key, "LOG_FIELD"))
         checks["time"] = "NOT_OBSERVED" if not trace.get("occurred_at") else ("REPORT_TIME_MISSING" if not target_time else ("MATCH" if abs(event_time(trace["occurred_at"]) - target_time) <= TIME_WINDOW else "MISMATCH"))
         checks["timezone"] = provenance.get("timezone", "NOT_OBSERVED")

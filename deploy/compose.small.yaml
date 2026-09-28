@@ -1,0 +1,9 @@
+# Initial single-user deployment on a 2 GB VM. Actual Linux memory usage must
+# be measured before adding the remote API or more concurrent users.
+services:
+  web:
+    mem_limit: 1g
+    cpus: 1.0
+  proxy:
+    mem_limit: 128m
+    cpus: 0.25

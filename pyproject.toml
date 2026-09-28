@@ -21,9 +21,14 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest==9.1.1"]
+service = ["fastapi==0.141.1", "uvicorn==0.54.0"]
 
 [project.entry-points."nat.plugins"]
 tracebridge = "tracebridge.nat_plugin"
 
 [tool.setuptools.packages.find]
 include = ["tracebridge*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["output", "tmp", ".venv", ".git"]

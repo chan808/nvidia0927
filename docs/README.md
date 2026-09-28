@@ -1,50 +1,61 @@
-# TraceBridge 문서 지도
+# TraceBridge 문서 안내
 
-이 디렉터리가 **목표 서비스의 기준 문서**다. 문서는 제품 전체를 설명하며, 현재 구현 완료를 뜻하지 않는다. 작업 전 아래 순서로 읽고 코드·실행 결과와 대조한다.
+현재 기능은 [구현 상태](current-state.md), 최신 로컬 실행 증거는 [GUI 최종 검증](validation/local-gui-final.md), 이전 통합은 [최종 로컬 통합](validation/main-integration.md)에서 확인하세요. 사용법, 제품 목표, 과거 기록을 아래처럼 나눴습니다.
 
-최신 구현·통합 결과·시연 명령은 [A~D 메인 통합](main-integration.md)을 먼저 읽는다. [최종 단계 전 서비스 점검](pre-final-readiness.md)은 개선 전 판단과 과거 실제 실행 기록이다.
+## 사용법
 
-**남은 작업의 실행 순서와 완료 기준은 [남은 작업 최종 설계](final-completion-plan.md)의 R1~R6을 따른다.** 이 계획은 앞으로의 작업이며 기존 구현·검증 완료 기록과 구분한다.
+| 문서 | 내용 |
+| --- | --- |
+| [시작하기](guides/getting-started.md) | 지원 환경, 설치, 설정, 첫 화면 |
+| [사용법](guides/usage.md) | 제보·사진·후속 답변·프로젝트 연결·기억·수정안·기존 데모 |
+| [실제 프로젝트 운영](guides/real-projects.md) | 실제 다중 경로·서비스 등록, 일반 수정·검사·검토 적용, PC 페어링·배포 웹 |
+| [검증 절차](guides/verification.md) | 오프라인 재생, 회귀, 실자료 검증 준비 |
+| [Agolive 수동 조사](guides/agolive.md) | 기존 수동/GPT 페이지의 연결과 제한 |
+| [클라우드 웹과 로컬 실행기](guides/cloud-and-local.md) | 다중 경로 등록, 소유자 전용 원격 연결의 구현 범위와 후속 운영 조건 |
+| [배포 가이드](guides/deployment.md) | CPU 서버·Compose·HTTPS·영속 저장·백업, 비공개 웹과 로컬 연결의 완료 기준 |
+| [신규 AWS 계정](guides/new-aws.md) | 현재 배포 방향: 무료 자격·계정 분리, EC2 템플릿, 수동 Linux 이미지 검증 |
+| [무료 배포](guides/free-deployment.md) | AWS Free plan EC2, Lightsail 90일 체험, Oracle Always Free와 2 GB 설정 |
+| [기존 서버 재사용](guides/existing-server.md) | Agolive EC2·Nginx·SSM 확인 결과와 별도 Compose 공유 배포 절차 |
 
-시간 제약에 따른 실제 배치는 [병렬 실행 프롬프트](parallel-work-prompts.md)의 A~D를 사용한다. 파일 소유권을 나누고 최종 통합·전체 회귀는 메인 세션에서 수행한다.
+## 설계
 
-병렬 편집 중 실제 테스트를 준비하려면 [로컬 검증 절차](local-verification.md)와 [메인 기반 작업 인계](parallel/MAIN-foundation.md)를 본다. 고정 사본·독립 DB의 검사와 최종 통합·실서비스 검증을 구분한다.
+이 문서들은 목표와 계약을 설명합니다. 구현 완료 여부는 [현재 상태](current-state.md)와 대조하세요.
 
-A·D 완료를 기다리는 동안 진행한 회귀·기억 흐름·저장 재시도 보완과 통합할 항목은 [사전 통합 점검](preintegration-checks.md)에 있다.
+| 문서 | 내용 |
+| --- | --- |
+| [제품](design/product.md) | 사용자, 가치, 제품 범위 |
+| [사건 흐름](design/workflows.md) | 상태, 분류, 담당 역할, 보고 |
+| [시스템 구조](design/architecture.md) | 구성 요소와 도구·실행 계약 |
+| [클라우드·로컬 운영 개선안](design/cloud-local-operations.md) | 현재 코드의 간격, 로컬 조사 배치, API·작업 복구·다중 서비스·일반 수정·출시 조건 |
+| [자료와 기억](design/data-model.md) | 사건·근거·실행·검토·검색 |
+| [권한과 정책](design/policy-security.md) | 자료 접근, 작업 허용, 자동화 수준 |
+| [평가와 운영](design/evaluation-operations.md) | 정확성·비용·운영 기준 |
+| [로드맵](design/roadmap.md) | 기능 의존성과 후속 확장 |
 
-| 순서 | 문서 | 책임 |
-| --- | --- | --- |
-| 1 | [현재 구현과 간격](current-state.md) | 저장소에서 검증된 기능, 미구현 기능, 알려진 제약 |
-| 2 | [제품 계약](product.md) | 해결할 문제, 사용자, 서비스 경계, 성공 기준 |
-| 3 | [사건 흐름과 라우팅](workflows.md) | 제보부터 분류·담당자 선택·해결·보고까지의 상태와 분기 |
-| 4 | [시스템 구조](architecture.md) | 에이전트·규칙 코드·연결기·실행 환경의 책임과 인터페이스 |
-| 5 | [자료 모델과 사건 기억](data-model.md) | 영속 객체, 증거·버전 추적, 유사 사건 재사용 |
-| 6 | [권한과 자동화 정책](policy-security.md) | 불특정 제보자와 프로젝트 내부 자료 사이의 경계, 자동 해결 단계 |
-| 7 | [평가와 운영](evaluation-operations.md) | 정확성·비용·성능·사후 검증과 운영 지표 |
-| 8 | [구축 단계](roadmap.md) | 제품 전체의 기능 의존성과 각 단계의 완료 조건 |
-| 9 | [대회 조건과 NVIDIA 기술](competition.md) | 사용자 제공 이미지의 조건, 현재 증거, 목표 통합, 불확실성 |
-| 10 | [대회용 최소 구현 순서](competition-mvp.md) | 작은 수직 흐름의 단계·완료 증거·현재 진행 |
-| 11 | [자연어·사진 제보](multimodal-intake.md) | 사진 해석, 제보 단서/관측 구분, 실제 NVIDIA 조사와 실행 방법 |
-| 12 | [NVIDIA 실제 검증 기록](nvidia-validation.md) | 실제 마이크로서비스·모델 호출의 입력·결과·한계 |
-| 13 | [1·2단계 검토 결과](stage-1-2-review.md) | 완료 범위, 재현·수정한 결함, 회귀 검사, 남은 연결 |
-| 14 | [다른 세션용 작업 프롬프트](next-session-prompt.md) | 2단계 마무리와 3~5단계를 이어받는 구체적인 작업 지시 |
-| 15 | [접수·판정 통합 결과](stage-2-integration.md) | 공통 계약·후속 답변·로그 범위·버전 출처·종료 상태와 실사건 검증 미완료 |
-| 16 | [SQLite 사건 기억](stage-3-memory.md) | 로컬 저장·재시작 후 조회/답변·카드 검토·정확/FTS5 검색·현재 재확인과 합성 검증 |
-| 17 | [한 가지 격리 수정·검증](stage-4-change.md) | 등록 씨드 A2 정책·실제 Nemotron 제안·후보 diff·동일 검사/회귀·검토 대기·격리 보장 한계 |
-| 18 | [남은 작업 최종 설계](final-completion-plan.md) | 로그 완전성·공통 판정·프로젝트 근거·적응형 조사/작업·매뉴얼·실자료 비교·제출의 R1~R6 완료 기준 |
-| 19 | [병렬 실행 프롬프트](parallel-work-prompts.md) | 동시에 시작할 A~D의 파일 소유권·복사용 프롬프트·최종 통합 지시 |
-| 20 | [로컬 검증 준비](local-verification.md) | 병렬 편집 중 소스 고정·환경 기록·독립 CLI 검사·화면/실자료 준비 |
+## 검증 기록
 
-## 문서 우선순위
+- [로컬 GUI 최종 검증](validation/local-gui-final.md): 실제 브라우저 등록·제보·실모델 후보·원본 적용·재열기·실행기 재연결과 551개 회귀
+- [최종 로컬 통합](validation/main-integration.md): A~D 통합, 전체 회귀와 재현 범위
+- [실제 프로젝트 운영 연결](validation/real-project-operations.md): daily 사본의 229개 프론트 검사, 실제 NVIDIA 게이트웨이와 원격 작업 계약
+- [검증 메타데이터](validation/release-verification.json): 당시 실행·해시·미완료 항목
+- [NVIDIA 실제 호출 기록](validation/nvidia-validation.md): 과거 OCR·모델 호출과 한계
+- [SkillSpector 검사](validation/skill-scan-report.md): 정적 검사 결과
+- [배포 기반 확인](validation/deployment-foundation.md): 설정 확인 43개와 기존 AWS 서버 조회, TraceBridge 기동·HTTPS·로컬 연결은 미확인
+- [신규 AWS 기반 확인](validation/new-aws-foundation.md): 계정 확인 경로 27개·배포 설정 44개·로컬 씨드 저장, AWS 생성과 Linux CI는 미수행
+- [실제 Linux 이미지 확인](validation/linux-deployment.md): 이미지 빌드·1 GB 실행·초기 화면·데이터 유지·Caddy 설정 및 전송용 파일
 
-1. **제품 목표·정책:** 이 디렉터리의 문서. 모순이 있으면 `product.md`와 `policy-security.md`를 먼저 따르고, 다른 문서를 수정해 일치시킨다.
-2. **현재 사실:** 실행 가능한 코드와 테스트, [루트 README](../README.md), [현재 구현 설계](../DESIGN.md), [Agolive 연결](../AGOLIVE_INTEGRATION.md). 목표 문서가 현재 기능을 증명하지 않는다.
-3. **과거 결정·초안:** [PRODUCT_DIRECTION.md](../PRODUCT_DIRECTION.md), [IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md), [BUGFIX_AGENT_IMPLEMENTATION_PLAN.md](../BUGFIX_AGENT_IMPLEMENTATION_PLAN.md), [TRACEBRIDGE_FINAL_DESIGN.md](../TRACEBRIDGE_FINAL_DESIGN.md), [SUBMISSION_DRAFT.md](../SUBMISSION_DRAFT.md). 배경 자료로 읽되 새 작업 범위의 기준으로 사용하지 않는다.
+검증 기록의 날짜와 수행 범위를 함께 보세요. 파일 이동 후에도 당시 해시·원점·성공/실패 값은 보존합니다. 로컬 `output/` 산출물은 Git 저장소에 포함되지 않습니다.
 
-새 기능을 완료했다고 기록할 때는 코드 경로, 실행 명령, 테스트 또는 실제 연결 결과를 `current-state.md`에 추가한다. 대회 제출 문안은 `competition.md`와 **당시 실제 상태**를 다시 대조한다. 출처가 없는 가정은 구현 완료나 대회 충족으로 표시하지 않는다.
+## 대회 자료
 
-다음 세션에서 구현을 시작할 때는 이 문서 지도의 **모든 목표 문서**를 먼저 읽고, `current-state.md`를 코드·테스트·실행 환경으로 재검증한다. 선택한 기능의 제품 행동, 정책, 자료 모델, 평가 기준이 서로 맞는지 확인한 후 작업 범위를 정한다. 구현을 마치면 해당 문서와 현재 상태를 함께 갱신한다. 과거 초안의 우선순위를 자동으로 이어받지 않는다.
+- [조건과 NVIDIA 역할](competition/requirements.md)
+- [제출 확인 사항](competition/submission-readiness.md)
+- [신청 문안 초안](competition/submission-draft.md)
 
-## 이 서비스의 핵심 해석
+사용자가 별도로 제출을 완료했습니다. 문안 초안과 과거 준비 기록을 실제 업로드본과 동일한 파일로 간주하지 않습니다.
 
-누구나 오류를 제보할 수 있지만 누구나 프로젝트 코드·로그를 보거나 변경 작업을 지시할 권한이 생기지는 않는다. TraceBridge는 제보를 사건으로 묶고, 관측과 대조해 실제 결함 여부를 판단하며, 중요도·책임 영역·프로젝트 정책에 따라 조사 또는 수정 작업을 맡길 에이전트 역할과 알림 수신자를 정한다. 허용된 경우에는 격리된 수정·검증·배포 후 확인까지 자동으로 진행하고, 각 단계의 결과를 적절한 사람에게 보고한다. 이 전체 흐름은 [제품 계약](product.md)과 [사건 흐름](workflows.md)에 정의한다.
+## 과거 기록
+
+[보관 문서 목록](archive/README.md)에 초기 설계, 단계별 구현 결과, 사전 점검, A~D 세션 인계를 모았습니다. 과거 프롬프트의 남은 작업이나 검사 개수를 현재 상태로 사용하지 마세요.
+
+문서를 갱신할 때는 현재 기능·제약은 `current-state.md`, 실행 결과는 `validation/`, 명령과 설정은 `guides/`, 목표와 계약은 `design/`에 기록합니다. 코드·실행 증거와 문서가 다르면 현재 사실부터 바로잡습니다.
