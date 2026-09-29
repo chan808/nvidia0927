@@ -197,12 +197,14 @@ class LocalRunner:
 
     def _heartbeat_loop(self, stop_event):
         while not stop_event.is_set() and not self.stop.is_set():
+            active = self.active
             try:
                 self.api.request("POST", "/v1/runner/heartbeat", {})
-                if self.active:
-                    self.api.request("POST", f"/v1/runner/jobs/{self.active['job_id']}/renew", {"epoch": self.active["epoch"]})
+                if active is not None and self.active is active:
+                    self.api.request("POST", f"/v1/runner/jobs/{active['job_id']}/renew", {"epoch": active["epoch"]})
             except Exception as exc:
-                if self.active:
+                # A completed job's delayed renewal must not revoke its successor.
+                if active is not None and self.active is active:
                     self.lease_failure = type(exc).__name__
             stop_event.wait(15)
 

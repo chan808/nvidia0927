@@ -42,6 +42,19 @@ jobs:
             --tmpfs /app/generated:uid=10001,gid=10001,mode=0700 "$IMAGE" python deploy/offline_smoke.py
       - name: Check full Compose, PostgreSQL, local TLS and restart persistence
         run: sudo python3 scripts/check_deployment.py --image "$IMAGE" --revision "$GITHUB_SHA"
+      - name: Export the checked image for manual transfer
+        if: ${{ inputs.export_image }}
+        run: |
+          mkdir -p output
+          docker save "$IMAGE" | gzip > output/tracebridge-linux-amd64.tar.gz
+          sha256sum output/tracebridge-linux-amd64.tar.gz > output/tracebridge-linux-amd64.tar.gz.sha256
+      - name: Upload the optional image archive
+        if: ${{ inputs.export_image }}
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: tracebridge-image-${{ github.sha }}
+          path: output/tracebridge-linux-amd64.tar.gz*
+          retention-days: 1
       - name: Record deployment evidence
         if: always()
         uses: actions/upload-artifact@v7.0.1

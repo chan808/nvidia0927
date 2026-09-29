@@ -41,14 +41,17 @@ jobs:
           cache: pip
       - name: Install and check dependencies
         run: |
-          python -m pip install ".[test,service,postgres]"
+          python -m pip install -r requirements-linux-py312.lock ".[test,service,postgres]"
           python -m pip check
+          python -m pip freeze --exclude tracebridge-demo > requirements-resolved-linux.txt
       - name: Run regression with isolated databases and model doubles
         run: python -m pytest -q --junitxml output/regression.xml
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: regression-results
-          path: output/regression.xml
+          path: |
+            output/regression.xml
+            requirements-resolved-linux.txt
           retention-days: 7
           if-no-files-found: warn

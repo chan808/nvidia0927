@@ -2,6 +2,7 @@
 # developer's .env, incident database, local profiles, or attached reports.
 **
 !pyproject.toml
+!requirements-linux-py312.lock
 !README.md
 !app.py
 !nat_workflow.yml

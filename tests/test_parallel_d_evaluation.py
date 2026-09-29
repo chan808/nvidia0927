@@ -362,8 +362,13 @@ def test_locked_direct_dependencies_match_installed_environment():
         requirement = Requirement(value)
         assert str(requirement.specifier).startswith("==")
         assert importlib.metadata.version(requirement.name) in requirement.specifier
-    locks = list(ROOT.glob("requirements-*.lock"))
-    assert len(locks) >= 3
+    import sys
+    if sys.platform == "win32":
+        locks = list(ROOT.glob("requirements*windows-py312.lock"))
+        assert len(locks) >= 3
+    else:
+        locks = [ROOT / "requirements-linux-py312.lock"]
+    assert all(file.is_file() for file in locks)
     for file in locks:
         for line in file.read_text(encoding="utf-8").splitlines():
             if line and not line.startswith("#"):

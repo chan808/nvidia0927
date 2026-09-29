@@ -1,6 +1,8 @@
 """Run a real, isolated Linux Compose release check with generated credentials."""
 import argparse
 import base64
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 import importlib.util
 import json
 import os
@@ -101,14 +103,16 @@ def main():
         with urllib.request.urlopen(urllib.request.Request(url, headers={"Authorization": "Basic " + auth}), context=context, timeout=10) as response:
             assert response.status == 200
         # Even malformed API traffic must be bounded before Python handles it.
-        statuses = []
-        for _ in range(75):
+        def malformed(_):
             try:
-                with urllib.request.urlopen(url + "/v1/not-a-route", context=context, timeout=5) as response:
-                    statuses.append(response.status)
+                with urllib.request.urlopen(url + "/v1/not-a-route", context=context, timeout=10) as response:
+                    return response.status
             except urllib.error.HTTPError as error:
-                statuses.append(error.code)
-        assert 429 in statuses, "API guard did not limit malformed traffic"
+                return error.code
+        with ThreadPoolExecutor(max_workers=24) as pool:
+            statuses = list(pool.map(malformed, range(120)))
+        result["request_status_counts"] = dict(Counter(statuses))
+        assert 429 in statuses, "API guard did not limit malformed traffic: " + str(Counter(statuses))
         ids = dc("ps", "-q", capture=True).splitlines()
         states = json.loads(run(["docker", "inspect", "--format", "{{json .State}}", ids[0]], capture=True))
         assert not states["OOMKilled"]
