@@ -58,3 +58,5 @@ AWS Pricing API 확인값: 서울 t3.small $0.026/시간, gp3 $0.0912/GiB·월. 
 
 배포 전 dump는 같은 디스크에 있어 외부 백업을 대체하지 않는다. DB 마이그레이션 뒤에는 이전 이미지 자동 롤백을 하지 않는다. 복구할 때 dump·스키마·코드 버전을 함께 검토한다.
 
+
+신규 GitHub 저장소는 OIDC subject에 소유자·저장소의 숫자 ID를 포함한다. 이 템플릿은 저장소 API와 실제 AWS 감사 이벤트로 확인한 immutable prefix를 사용하며 브랜치 두 개만 허용한다. 저장소 이름만 사용한 옛 형식으로 변경하지 않는다. [GitHub OIDC](https://docs.github.com/en/actions/reference/security/oidc#immutable-subject-claims)

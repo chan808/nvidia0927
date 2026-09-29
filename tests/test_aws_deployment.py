@@ -42,10 +42,11 @@ def test_deploy_role_targets_only_the_new_instance_and_dedicated_document():
     trust = template["Resources"]["GithubRole"]["Properties"]["AssumeRolePolicyDocument"]["Statement"][0]
     subjects = trust["Condition"]["StringEquals"]["token.actions.githubusercontent.com:sub"]
     assert subjects == [
-        {"Fn::Sub": "repo:${GithubRepository}:ref:refs/heads/main"},
-        {"Fn::Sub": "repo:${GithubRepository}:ref:refs/heads/${DeploymentBranch}"},
+        {"Fn::Sub": "${GithubSubjectPrefix}:ref:refs/heads/main"},
+        {"Fn::Sub": "${GithubSubjectPrefix}:ref:refs/heads/${DeploymentBranch}"},
     ]
     assert "*" not in str(subjects)
+    assert template["Parameters"]["GithubSubjectPrefix"]["AllowedValues"] == ["repo:chan808@177499146/nvidia0927@1390222127"]
 
 
 def test_ec2_has_no_ssh_and_no_unlimited_cpu_charge_mode():
