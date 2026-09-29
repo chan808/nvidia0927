@@ -25,6 +25,8 @@ def main():
     check = commands.add_parser("check")
     check.add_argument("--check-id", action="append")
     check.add_argument("--policy")
+    snapshot = commands.add_parser("snapshot")
+    snapshot.add_argument("--policy")
     policy = commands.add_parser("policy")
     policy.add_argument("--file", type=Path, required=True)
     prepare = commands.add_parser("prepare")
@@ -38,6 +40,8 @@ def main():
     apply = commands.add_parser("apply")
     apply.add_argument("--work-id", required=True)
     apply.add_argument("--diff-sha256", required=True, help="Hash of the reviewed and verified candidate diff")
+    recovery = commands.add_parser("verify-recovery")
+    recovery.add_argument("--work-id", required=True)
     args = parser.parse_args()
     try:
         if args.command == "register":
@@ -54,6 +58,13 @@ def main():
                 result = inspect_project(profile)
             elif args.command == "check":
                 result = run_project_checks(profile, policy_id=args.policy, check_ids=args.check_id)
+            elif args.command == "snapshot":
+                import time
+                from tracebridge.project_repair import load_repair_policy, _repository, _snapshot, _snapshot_hash
+                policy, digest = load_repair_policy(profile, args.policy)
+                result = {"project_id": profile.project_id, "policy_sha256": digest,
+                    "source_snapshot_sha256": _snapshot_hash(_snapshot(_repository(profile, policy), deadline=time.monotonic() + 30)),
+                    "scope": "LOCAL_SOURCE_ONLY"}
             elif args.command == "policy":
                 result = {"policy_path": str(save_repair_policy(json.loads(args.file.read_bytes()), profile))}
             elif args.command == "prepare":
@@ -65,6 +76,9 @@ def main():
                     result = store.get_change(args.project, args.work_id)
             elif args.command == "apply":
                 result = apply_project_change(args.project, args.work_id, profile, expected_diff_sha256=args.diff_sha256, db_path=args.db)
+            elif args.command == "verify-recovery":
+                from tracebridge.project_recovery import verify_project_recovery
+                result = verify_project_recovery(profile, args.work_id, db_path=args.db)
             else:
                 obtained = json.loads(args.file.read_bytes())
                 if obtained["job"]["project_id"] != args.project:

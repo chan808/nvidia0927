@@ -11,10 +11,12 @@ from pathlib import Path
 import re
 import sqlite3
 import time
+from sqlalchemy.exc import SQLAlchemyError
 
 from .project_sources import redact, REQUEST_ID
 from .report_contract import RUN_STATUSES
 from .triage import EXCEPTION_PATTERN
+from .semantic_memory import VECTOR_SCHEMA, current_review_matches, embedding_client_from_env, fuse_candidates, vector_candidates
 
 
 WORKSPACE = Path(__file__).resolve().parents[1]
@@ -25,6 +27,7 @@ EDITABLE = TEXT_EDITABLE | {"applicability", "check_sequence", "disproof_conditi
 CONDITION_KEYS = {"service", "environment", "operation", "method", "path", "runtime_sha", "local_sha"}
 ROUTES = {"GUIDANCE", "WORK_CANDIDATE", "INVESTIGATE", "REQUEST_CONTEXT"}
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS project_applications (work_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, record_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS incidents (
     project_id TEXT NOT NULL, incident_id TEXT NOT NULL,
     created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
@@ -126,7 +129,10 @@ def _selected(data: dict, keys) -> dict:
 
 def _memory_record(search: dict) -> dict:
     """Store search measurements and clue snapshots, not arbitrary nested input."""
-    output = _selected(search, ("status", "error_type", "strategy", "hit_count", "elapsed_ms", "query_signals", "query_hash"))
+    output = _selected(search, ("status", "error_type", "strategy", "hit_count", "elapsed_ms", "query_signals", "query_hash", "retrieval_scope"))
+    if "semantic" in search:
+        output["semantic"] = _selected(search["semantic"], ("status", "error_type", "embedding_calls", "scanned", "candidate_count",
+            "scan_truncated", "stale_skipped", "dimension_mismatches", "model_key", "query_cache_hits", "query_embedding_budget"))
     output["cards"] = []
     if search.get("status") == "DISABLED":
         output.update(hit_count=0, current_recheck={}, rechecks=[])
@@ -294,6 +300,8 @@ def minimal_record(result: dict) -> dict:
     if "change" in result:
         record["change"] = _selected(result["change"], ("work_id", "source_run_id", "status", "review_status", "case_kind", "policy", "diff",
             "candidate_fix_verified", "original_applied", "deployment_status", "service_recovery", "artifact_ref", "model_mode", "verification_scope"))
+    if "recovery" in result:
+        record["recovery"] = _metadata(result["recovery"])
     return record
 
 
@@ -359,8 +367,9 @@ def _verification_results(record: dict, job: dict | None = None) -> dict:
             "source_run_id": run_id,
         },
         "service_recovery": {
-            "status": "RECORDED_VERIFIED" if change.get("service_recovery") == "VERIFIED" else "NOT_VERIFIED",
+            "status": "RECORDED_VERIFIED" if change.get("service_recovery") == "VERIFIED" else change.get("service_recovery", "NOT_VERIFIED"),
             "source_run_id": run_id, "legacy_fix_verified": record.get("fix_verified") is True,
+            "evidence": _metadata(record.get("recovery", {})),
         },
     }
 
@@ -610,8 +619,47 @@ def _render_manual(project_id: str, cards: list[dict]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def validate_project_change(job: dict, run: dict) -> str:
+    """The same strict candidate evidence contract for every storage backend."""
+    for key in ("work_id", "project_id", "incident_id", "source_run_id", "result_run_id"):
+        _id(job[key], key)
+    if (job.get("record_format") != "project_change_job_v1" or len(_json(job)) > 100_000
+            or job.get("case_kind") != "REGISTERED_PROJECT"
+            or job.get("status") not in {"CHANGE_PREPARED", "POLICY_REJECTED", "NOT_REPRODUCED", "MODEL_NOT_REQUESTED", "MODEL_FAILED", "VERIFICATION_FAILED", "TIMED_OUT"}
+            or job.get("review_status") != "WAITING_REVIEW" or job.get("original_applied") is not False
+            or job.get("deployment_status") != "NOT_ATTEMPTED" or job.get("service_recovery") != "NOT_VERIFIED"
+            or any(run.get(key) is not False for key in ("cause_confirmed", "fix_applied", "fix_verified"))
+            or (run.get("project_id"), run.get("incident_id"), run.get("run_id")) != (job["project_id"], job["incident_id"], job["result_run_id"])
+            or run.get("change", {}).get("work_id") != job["work_id"]
+            or run["change"].get("verification_scope") != "REGISTERED_PROJECT_SNAPSHOT_ONLY"):
+        raise ValueError("Invalid registered project candidate record")
+    checks = job.get("checks", [])
+    check_ids = job.get("policy", {}).get("check_ids", [])
+    verified = (job["status"] == "CHANGE_PREPARED" and job.get("original_unchanged") is True
+        and bool(job.get("baseline", {}).get("snapshot_sha256")) and bool(job.get("candidate", {}).get("snapshot_sha256"))
+        and bool(job.get("diff", {}).get("sha256")) and job.get("identical_related_check") is True
+        and len(check_ids) == 2 and len(checks) == 3
+        and [item["phase"] for item in checks] == ["before", "after", "regression"]
+        and [item["status"] for item in checks] == ["FAILED", "PASSED", "PASSED"]
+        and [item["exit_code"] for item in checks] == [1, 0, 0]
+        and [item["command_id"] for item in checks] == [check_ids[0], check_ids[0], check_ids[1]]
+        and all(item.get("candidate_integrity") == "UNCHANGED" for item in checks)
+        and checks[0].get("failure_marker_observed") is True
+        and all(item.get("success_marker_observed") is True for item in checks[1:])
+        and checks[0]["argv"] == checks[1]["argv"] and checks[0]["input"] == checks[1]["input"]
+        and checks[0]["execution_settings_sha256"] == checks[1]["execution_settings_sha256"])
+    if job.get("candidate_fix_verified") is not verified or run["change"].get("candidate_fix_verified") is not verified or (job["status"] == "CHANGE_PREPARED") != verified:
+        raise ValueError("Candidate verification requires recorded reproduction and regression")
+    return _hash(_json({"job": job, "run": run}))
+
+
 class IncidentStore:
     """Local run/card records and minimal A2 jobs, atomic writes and bounded waits."""
+
+    def __new__(cls, path=None):
+        if getattr(path, "postgres", False):
+            return path.incidents()
+        return super().__new__(cls)
 
     def __init__(self, path: str | Path | None = None):
         self.path = db_location(path)
@@ -623,7 +671,7 @@ class IncidentStore:
             version = self.connection.execute("PRAGMA user_version").fetchone()[0]
             if version not in (0, 1, 2):
                 raise ValueError("Unsupported incident database version")
-            self.connection.executescript(SCHEMA)
+            self.connection.executescript(SCHEMA + VECTOR_SCHEMA)
             self.connection.execute("PRAGMA user_version=2")
         except Exception:
             self.connection.close()
@@ -722,36 +770,7 @@ class IncidentStore:
 
     def save_project_change(self, job: dict, run: dict) -> str:
         """A separate generic candidate contract; the seed validator remains strict."""
-        for key in ("work_id", "project_id", "incident_id", "source_run_id", "result_run_id"):
-            _id(job[key], key)
-        if (job.get("record_format") != "project_change_job_v1" or len(_json(job)) > 100_000
-                or job.get("case_kind") != "REGISTERED_PROJECT"
-                or job.get("status") not in {"CHANGE_PREPARED", "POLICY_REJECTED", "NOT_REPRODUCED", "MODEL_NOT_REQUESTED", "MODEL_FAILED", "VERIFICATION_FAILED", "TIMED_OUT"}
-                or job.get("review_status") != "WAITING_REVIEW" or job.get("original_applied") is not False
-                or job.get("deployment_status") != "NOT_ATTEMPTED" or job.get("service_recovery") != "NOT_VERIFIED"
-                or any(run.get(key) is not False for key in ("cause_confirmed", "fix_applied", "fix_verified"))
-                or (run.get("project_id"), run.get("incident_id"), run.get("run_id")) != (job["project_id"], job["incident_id"], job["result_run_id"])
-                or run.get("change", {}).get("work_id") != job["work_id"]
-                or run["change"].get("verification_scope") != "REGISTERED_PROJECT_SNAPSHOT_ONLY"):
-            raise ValueError("Invalid registered project candidate record")
-        checks = job.get("checks", [])
-        check_ids = job.get("policy", {}).get("check_ids", [])
-        verified = (job["status"] == "CHANGE_PREPARED" and job.get("original_unchanged") is True
-            and bool(job.get("baseline", {}).get("snapshot_sha256")) and bool(job.get("candidate", {}).get("snapshot_sha256"))
-            and bool(job.get("diff", {}).get("sha256")) and job.get("identical_related_check") is True
-            and len(check_ids) == 2 and len(checks) == 3
-            and [item["phase"] for item in checks] == ["before", "after", "regression"]
-            and [item["status"] for item in checks] == ["FAILED", "PASSED", "PASSED"]
-            and [item["exit_code"] for item in checks] == [1, 0, 0]
-            and [item["command_id"] for item in checks] == [check_ids[0], check_ids[0], check_ids[1]]
-            and all(item.get("candidate_integrity") == "UNCHANGED" for item in checks)
-            and checks[0].get("failure_marker_observed") is True
-            and all(item.get("success_marker_observed") is True for item in checks[1:])
-            and checks[0]["argv"] == checks[1]["argv"] and checks[0]["input"] == checks[1]["input"]
-            and checks[0]["execution_settings_sha256"] == checks[1]["execution_settings_sha256"])
-        if job.get("candidate_fix_verified") is not verified or run["change"].get("candidate_fix_verified") is not verified or (job["status"] == "CHANGE_PREPARED") != verified:
-            raise ValueError("Candidate verification requires recorded reproduction and regression")
-        digest = _hash(_json({"job": job, "run": run}))
+        digest = validate_project_change(job, run)
         with self.connection:
             self.connection.execute("BEGIN IMMEDIATE")
             old = self.connection.execute("SELECT content_hash FROM change_jobs WHERE work_id=?", (job["work_id"],)).fetchone()
@@ -857,6 +876,8 @@ class IncidentStore:
             card["review"] = {"status": status, "revision": revision, "reviewer": reviewer, "at": event["at"], "note": event["note"], "history": [*card["review"]["history"], event]}
             self.connection.execute("UPDATE cards SET review_status=?,card_json=? WHERE project_id=? AND card_id=?", (status, _json(card), project_id, card_id))
             self.connection.execute("DELETE FROM card_search WHERE card_id=?", (card_id,))
+            # An edited/rejected/reapproved card must never keep an old vector.
+            self.connection.execute("DELETE FROM card_embeddings WHERE project_id=? AND card_id=?", (project_id, card_id))
             if status in REUSABLE:
                 # Only reviewable summaries and observed fingerprints are indexed.
                 text = " ".join([card["symptom"], card["finding"], card["next_action"], *[step["step"] for step in card["check_sequence"]], *[term for values in card["signals"].values() for term in values]])
@@ -883,7 +904,8 @@ class IncidentStore:
             self.connection.execute("BEGIN")
             return snapshot()
 
-    def search(self, project_id: str, query: str = "", *, signals: dict | None = None, exclude_incident_id: str | None = None) -> dict:
+    def search(self, project_id: str, query: str = "", *, signals: dict | None = None,
+               exclude_incident_id: str | None = None, scope_filters: dict | None = None, embedding_client=None) -> dict:
         started = time.perf_counter()
         project_id = _id(project_id, "project_id")
         if not isinstance(query, str) or len(query) > 12000:
@@ -897,6 +919,13 @@ class IncidentStore:
         exact["paths"] = [_path(value) for value in exact["paths"]]
         scope = "c.project_id=? AND c.review_status IN ('APPROVED','EDITED')"
         scope_args = [project_id]
+        scope_filters = {} if scope_filters is None else scope_filters
+        if (not isinstance(scope_filters, dict) or set(scope_filters) - {"service", "environment"}
+                or any(not isinstance(value, str) or not 1 <= len(value) <= 80 for value in scope_filters.values())):
+            raise ValueError("Known service/environment retrieval filters required")
+        for key, value in scope_filters.items():
+            scope += f" AND json_extract(c.card_json,'$.scope.{key}')=?"
+            scope_args.append(value)
         if exclude_incident_id is not None:
             scope += " AND c.incident_id<>?"
             scope_args.append(_id(exclude_incident_id, "incident_id"))
@@ -907,19 +936,41 @@ class IncidentStore:
                 expressions.append(f"{weight} * EXISTS(SELECT 1 FROM json_each(c.signals_json, '$.{key}') WHERE value IN ({marks}))")
                 args.extend(exact[key])
         rows, strategy = [], "NONE"
+        candidate_limit = 20 if embedding_client is not None else 2
         if expressions:
             # Field names and weights are program constants; every value is bound.
-            rows = self.connection.execute(f"SELECT c.card_id, ({' + '.join(expressions)}) AS score FROM cards c WHERE {scope} AND score>0 ORDER BY score DESC, json_extract(c.card_json,'$.card_kind')='GUIDANCE' DESC, c.rowid DESC LIMIT 2", [*args, *scope_args]).fetchall()
+            rows = self.connection.execute(f"SELECT c.card_id, json_extract(c.card_json,'$.review.revision') AS review_revision, ({' + '.join(expressions)}) AS score FROM cards c WHERE {scope} AND score>0 ORDER BY score DESC, json_extract(c.card_json,'$.card_kind')='GUIDANCE' DESC, c.rowid DESC LIMIT ?", [*args, *scope_args, candidate_limit]).fetchall()
             if rows:
                 strategy = "EXACT"
         terms = list(dict.fromkeys(re.findall(r"[^\W_]+(?:_[^\W_]+)*", redact(query), re.UNICODE)))[:12]
         terms = [term for term in terms if 2 <= len(term) <= 80]
         if not rows and terms:
             # Quoted lexical tokens never act as FTS operators, columns or syntax.
-            match = " OR ".join('"' + term + '"' for term in terms)
-            rows = self.connection.execute(f"SELECT c.card_id FROM card_search JOIN cards c ON c.card_id=card_search.card_id WHERE {scope} AND card_search MATCH ? ORDER BY bm25(card_search), c.rowid DESC LIMIT 2", [*scope_args, match]).fetchall()
+            # Prefix matching tolerates Korean particles (가입 -> 가입이/가입을).
+            match = " OR ".join('"' + term + '"' + ('*' if re.fullmatch(r"[가-힣]+", term) else '') for term in terms)
+            rows = self.connection.execute(f"SELECT c.card_id, json_extract(c.card_json,'$.review.revision') AS review_revision FROM card_search JOIN cards c ON c.card_id=card_search.card_id WHERE {scope} AND card_search MATCH ? ORDER BY bm25(card_search), c.rowid DESC LIMIT ?", [*scope_args, match, candidate_limit]).fetchall()
             strategy = "FTS5"
-        cards = [self.get_card(project_id, row["card_id"]) for row in rows]
+        card_ids = [row["card_id"] for row in rows][:2]
+        revisions = {row["card_id"]: row["review_revision"] for row in rows}
+        semantic = None
+        if embedding_client is not None:
+            if strategy == "EXACT" and len(card_ids) == 2:
+                semantic = {"status": "SKIPPED_EXACT_MATCH", "embedding_calls": 0}
+            else:
+                try:
+                    semantic = vector_candidates(self, project_id, query, embedding_client,
+                        scope_filters=scope_filters, exclude_incident_id=exclude_incident_id)
+                    vector_ids = [item["card_id"] for item in semantic["candidates"]]
+                    for item in semantic["candidates"]:
+                        revisions.setdefault(item["card_id"], item["review_revision"])
+                    if vector_ids:
+                        card_ids = fuse_candidates([row["card_id"] for row in rows], vector_ids, exact=strategy == "EXACT")
+                        strategy = "HYBRID" if rows else "VECTOR"
+                except Exception as exc:
+                    # An unavailable optional retriever cannot erase lexical results.
+                    semantic = {"status": "FAILED", "error_type": type(exc).__name__}
+        cards = [self.get_card(project_id, card_id) for card_id in card_ids]
+        cards = [card for card in cards if current_review_matches(card, revisions[card["card_id"]], scope_filters, exclude_incident_id)]
         for card in cards:
             card["review"].pop("history", None)
             # Bare historical IDs must not collide with a new run's L1/C1/R1.
@@ -927,7 +978,11 @@ class IncidentStore:
                 for prefix in ("supporting", "contradicting"):
                     hypothesis.pop(f"{prefix}_evidence_ids", None)
                     hypothesis[f"{prefix}_evidence_refs"] = [f"historical:{ref['run_id']}:{ref['evidence_id']}" for ref in hypothesis[f"{prefix}_evidence_refs"]]
-        return {"status": "OK", "strategy": strategy, "hit_count": len(cards), "elapsed_ms": round((time.perf_counter() - started) * 1000, 3), "query_signals": exact, "query_hash": _hash(query), "cards": cards}
+        output = {"status": "OK", "strategy": strategy, "hit_count": len(cards), "elapsed_ms": round((time.perf_counter() - started) * 1000, 3), "query_signals": exact, "query_hash": _hash(query), "cards": cards,
+                  "retrieval_scope": dict(scope_filters)}
+        if semantic is not None:
+            output["semantic"] = {key: value for key, value in semantic.items() if key != "candidates"}
+        return output
 
 
 def _empty_search(status: str, query: str, started: float) -> dict:
@@ -936,18 +991,29 @@ def _empty_search(status: str, query: str, started: float) -> dict:
         "elapsed_ms": round((time.perf_counter() - started) * 1000, 3)}
 
 
-def search_memory(project_id: str, query: str, *, signals: dict | None = None, exclude_incident_id: str | None = None, db_path: str | Path | None = None, enabled: bool = True) -> dict:
+def search_memory(project_id: str, query: str, *, signals: dict | None = None, exclude_incident_id: str | None = None,
+                  db_path: str | Path | None = None, enabled: bool = True, scope_filters: dict | None = None,
+                  embedding_client=None, semantic_enabled: bool = False) -> dict:
     started = time.perf_counter()
     try:
         if type(enabled) is not bool:
             raise ValueError("Memory enabled option must be a bool")
         if not enabled:
             return _empty_search("DISABLED", query, started)
+        configuration_error = None
+        if embedding_client is None and semantic_enabled:
+            try:
+                embedding_client = embedding_client_from_env()
+            except (KeyError, ValueError) as exc:
+                configuration_error = type(exc).__name__
         with IncidentStore(db_path) as store:
-            result = store.search(project_id, query, signals=signals, exclude_incident_id=exclude_incident_id)
+            result = store.search(project_id, query, signals=signals, exclude_incident_id=exclude_incident_id,
+                scope_filters=scope_filters, embedding_client=embedding_client)
+        if configuration_error:
+            result["semantic"] = {"status": "FAILED", "error_type": configuration_error}
         result["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 3)
         return result
-    except (OSError, sqlite3.Error, ValueError) as exc:
+    except (OSError, sqlite3.Error, SQLAlchemyError, ValueError) as exc:
         return {**_empty_search("FAILED", query, started), "error_type": type(exc).__name__}
 
 

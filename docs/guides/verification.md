@@ -1,6 +1,6 @@
 # 검증 절차
 
-명령은 저장소 루트에서 실행합니다. 현재 지원 환경과 설치는 [시작하기](getting-started.md)를 먼저 보세요. 완료 증거는 [최종 로컬 통합](../validation/main-integration.md)에 기록돼 있습니다.
+명령은 저장소 루트에서 실행합니다. 현재 지원 환경과 설치는 [시작하기](getting-started.md)를 먼저 보세요. 최신 전체 검사와 적용 후 확인은 [서비스 확인 검증](../validation/project-recovery.md), 저장·검색 통합은 [PostgreSQL 재검토](../validation/postgres-rag-review.md)에 기록돼 있습니다. [최종 로컬 통합](../validation/main-integration.md)은 이전 단계의 기록입니다.
 
 ## 오프라인 기능 확인
 
@@ -26,6 +26,18 @@ git diff --check
 ```
 
 정식 회귀 범위는 `tests/`입니다. `generated/`의 수정 전 샘플 테스트는 별도입니다. 평가 입력과 재현 방법은 [평가 자료](../../examples/evaluation/README.md)에 있습니다. 미실행 비교와 예상 시간 초과도 상태·종료 코드에 보존하므로 평가의 종료 1을 무조건 러너 결함으로 읽지 않습니다.
+
+기본 검사에서는 PostgreSQL 전용 사례를 건너뛴다. [중앙 DB 가이드](postgres-rag.md)의 선택 의존성을 설치하고, 전용 테스트 DB를 생성·삭제할 수 있는 **격리된 PostgreSQL** URL을 `TRACEBRIDGE_TEST_DATABASE_URL` 환경 변수에 설정한 뒤 같은 pytest 명령을 실행해야 중앙 저장·검색·이전·적용 보고까지 검사한다. URL은 비공개 설정에서 읽고 명령 인수·Git·검사 로그에 넣지 않는다. 실제 조사 대상 서비스나 운영 DB를 테스트 서버로 지정하지 않는다.
+
+회복 흐름만 확인하려면:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_project_recovery.py -q
+# 격리된 PostgreSQL 환경 변수를 설정한 환경에서:
+.\.venv\Scripts\python.exe -m pytest tests/test_postgres_storage.py -q
+```
+
+새 기능의 운영·연결 조건은 [daily 요청 관측](daily-observation.md), [적용 후 서비스 확인](project-recovery.md)을 따른다. 합성 HTTP 검사 통과와 실제 사용자 장애 회복을 구분한다.
 
 ## NAT 로컬 계측
 

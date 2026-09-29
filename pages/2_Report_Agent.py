@@ -57,7 +57,8 @@ if custom_project:
         health = st.session_state.get("project_health")
         if health and health.get("project_id") == configured_profile.project_id:
             st.write("연결 상태:", health["status"])
-            st.table([{key: item[key] for key in ("id", "log_status", "contract_status", "runtime_version_status")} for item in health["services"]])
+            st.table([{key: item.get(key, "미확인") for key in ("id", "log_status", "contract_status", "runtime_version_status", "service_status")} for item in health["services"]])
+            st.caption("코드·로그 연결, 실행 버전 기록, 현재 서비스 응답은 각각 확인합니다. 정상 응답은 제보 해결 확인과 별개입니다.")
             st.json(health)
 active_binding = profile + ("/" + selected_service if custom_project else "")
 if st.session_state.get("active_report_project") != active_binding:
@@ -287,7 +288,18 @@ if result:
                 except (OSError, ValueError, RuntimeError) as exc:
                     st.error(str(exc))
         if applied_already:
-            st.info("원본 적용 상태: APPLIED · 서비스 재기동/회복 확인은 별도입니다.")
+            st.info("원본 적용 상태: APPLIED · 서비스 회복: " + result.get("change", {}).get("service_recovery", "NOT_VERIFIED"))
+            if result.get("recovery"):
+                st.write("사건 상태:", result["recovery"]["incident_state"])
+                st.table(result["recovery"]["checks"])
+            if custom_project and st.button("적용 후 등록된 API 동작 확인", key="verify_project_recovery"):
+                try:
+                    from tracebridge.project_recovery import verify_project_recovery
+                    recovered = verify_project_recovery(configured_profile, job["work_id"], db_path=db_location())
+                    st.session_state.report_agent_result = {**recovered["run"], "persistence": recovered["persistence"]}
+                    st.rerun()
+                except (OSError, ValueError, RuntimeError) as exc:
+                    st.error(str(exc))
         if prepared.get("persistence", {}).get("status") == "FAILED":
             st.warning("작업 기록 저장에 실패했습니다. 확보한 결과의 저장만 재시도할 수 있습니다.")
             if st.button("작업 결과 저장만 재시도", key="retry_change_save"):

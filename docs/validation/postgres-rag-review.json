@@ -1,0 +1,143 @@
+{
+  "format": "tracebridge_postgres_rag_review_v1",
+  "recorded_at": "2026-09-29T04:21:45.060780+00:00",
+  "environment": {
+    "python": "3.12.7",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "postgresql": "18.6",
+    "pgvector_extension": "0.8.6",
+    "packages": {
+      "SQLAlchemy": "2.1.1",
+      "psycopg": "3.3.6",
+      "pgvector": "0.4.2",
+      "alembic": "1.20.0"
+    }
+  },
+  "tests": {
+    "status": "PASSED",
+    "passed": 632,
+    "seconds": 198.93,
+    "new_review_cases": 37,
+    "real_postgres_cases": 30,
+    "log": "output/pg-validation/review-final-regression.txt",
+    "live_provider_calls": 0,
+    "initial_api_failure_log": "output/pg-validation/review-api-before-fixes.txt",
+    "initial_order_failure_log": "output/pg-validation/review-order-before-fix.txt"
+  },
+  "checks": {
+    "pip_check": "PASSED",
+    "wheel_source_bytes": "MATCH",
+    "wheel_migrations": [
+      "tracebridge/storage/alembic/versions/20260929_01_central_storage.py",
+      "tracebridge/storage/alembic/versions/20260929_02_rag_jobs.py",
+      "tracebridge/storage/alembic/versions/20260929_03_scoped_references.py"
+    ],
+    "existing_revision_upgrade_and_rollback": "PASSED",
+    "existing_journal": "MATCH",
+    "foreign_keys": "PASS"
+  },
+  "wheel": {
+    "filename": "tracebridge_demo-0.1.0-py3-none-any.whl",
+    "sha256": "6c282bd84433fe2ae80ee2996cbcacfe349b72d20a44210686b9a59e57efc180",
+    "bytes": 214245
+  },
+  "data_preservation": {
+    "incidents": 2891,
+    "runs": 3120,
+    "unchanged_logical_tables": 7,
+    "readonly_row_comparison": "output/pg-validation/review-journal-after.json",
+    "live_cutover": false
+  },
+  "lifecycle": {
+    "generated_test_databases_remaining": 0,
+    "validation_cluster_stopped": true,
+    "cleanup_record": "output/pg-validation/review-resource-cleanup.json"
+  },
+  "limitations": [
+    "Owner pilot only; organization auth/RLS and automatic deployment/recovery remain open.",
+    "Real Korean embedding quality/cost/latency and real incident outcomes were not measured.",
+    "New Linux images, HTTPS rollout and real backup restore were not exercised."
+  ],
+  "sources": {
+    "tracebridge/storage/__init__.py": {
+      "sha256": "24b3af93179d8fce1eab46861549f785674d338d0dbafd1c3b85e1479940a8e5",
+      "bytes": 628
+    },
+    "tracebridge/storage/alembic/env.py": {
+      "sha256": "0b9423a076bf5fac6418652f47d61d43dda860e867661f32c9e70fbe2f9965d7",
+      "bytes": 499
+    },
+    "tracebridge/storage/alembic/versions/20260929_01_central_storage.py": {
+      "sha256": "41417c7f54783e93980524aa1259d00afc8c4542f5ada23529ae698cbb66f86d",
+      "bytes": 436
+    },
+    "tracebridge/storage/alembic/versions/20260929_02_rag_jobs.py": {
+      "sha256": "99857e3c451c2159bdbb86ca916bfb01d45130c26b7f73a4c98efac2ce041183",
+      "bytes": 1284
+    },
+    "tracebridge/storage/alembic/versions/20260929_03_scoped_references.py": {
+      "sha256": "9396a1d3b19aaac486ac9cb6d7366eda8fd5c3ffaa4f1d2c5e50a82b80490ea1",
+      "bytes": 2254
+    },
+    "tracebridge/storage/control.py": {
+      "sha256": "eca6521f49ca25c5a276ffeb077c8230691fe3506f4f587555e00e42138b0986",
+      "bytes": 10756
+    },
+    "tracebridge/storage/incidents.py": {
+      "sha256": "9b2ff64c98c69d6307d71d46928e1f53ec93056891868761cb9a738722c09e34",
+      "bytes": 25674
+    },
+    "tracebridge/storage/migrations.py": {
+      "sha256": "79b21c6b1ba3f2545dfb7724532e95413f770be0cb78f94e067a0374ea264d9b",
+      "bytes": 4426
+    },
+    "tracebridge/storage/rag_jobs.py": {
+      "sha256": "d600439492cdfe429b4f29002f052a4302a2e8d56489ac9aab94ef0e2a0ed92a",
+      "bytes": 8940
+    },
+    "tracebridge/storage/schema.py": {
+      "sha256": "b37000d281b1ddbd93b6ae52c4dcbd05432eece2c998c29f800a95a6b4d27f48",
+      "bytes": 5946
+    },
+    "tracebridge/storage/transfer.py": {
+      "sha256": "6f784534519249ca104f479f07f8a079cf28ed1ef0718dede01f109e5cafda9e",
+      "bytes": 12663
+    },
+    "tracebridge/control_plane.py": {
+      "sha256": "b24c1c2cf53a251e0608129f92acd64f822be34c835246ac234dcc0aaee696ec",
+      "bytes": 37109
+    },
+    "tracebridge/incident_memory.py": {
+      "sha256": "69b9405d09700522e7b0164bdb3a575b15f7f7ae2dcde97a697ebcb430262d1f",
+      "bytes": 80472
+    },
+    "tracebridge/semantic_memory.py": {
+      "sha256": "67837b4809ebda0b10d2cfa8bc846609f4934691c373b770cc009ed33421416b",
+      "bytes": 11542
+    },
+    "pages/3_Remote_Projects.py": {
+      "sha256": "b385ab8309455cec18f38b76dab470ed5f205d189043582b25ec70598c369b17",
+      "bytes": 11641
+    },
+    "scripts/memory_worker.py": {
+      "sha256": "c00a6bf50f5cf461547403f51af433146d2982ba52b7117aca514d5e42a139b4",
+      "bytes": 1629
+    },
+    "tests/test_storage_review.py": {
+      "sha256": "44a61cc3a055d6af4d151d1444420235ee3ceb9ed25f260c9bc794e2aad77b74",
+      "bytes": 14293
+    },
+    "tests/test_postgres_storage.py": {
+      "sha256": "b67178f0951c50409972f7790e7765d04f5c59f9768efd60219f50ab87ed8cda",
+      "bytes": 19665
+    },
+    "tests/conftest.py": {
+      "sha256": "ba009c842a0127db857a321a018036aff1ed53c4aee30afb781b226c0a26e90c",
+      "bytes": 426
+    },
+    "pyproject.toml": {
+      "sha256": "1b1cca85ec56f2855af3e95a87e6b5f79a49228ac4cf26afbe1595e12bab1dde",
+      "bytes": 1028
+    }
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "executed_at": "2026-09-29T01:41:27.938736+00:00",
+  "platform": "Windows",
+  "python": "3.12.7",
+  "scope": "PRIVATE_OWNER_OPERATIONAL_HARDENING",
+  "base_git_head": "c5ecbaa77a88dd59abd166802afbe12dba6dbff6",
+  "uncommitted_changes_included": true,
+  "final_regression": {
+    "passed": 579,
+    "duration_seconds": 108.56,
+    "exit_code": 0,
+    "command": "python -m pytest -q -p no:cacheprovider --basetemp output/<new-test-directory> --tb=short tests"
+  },
+  "prior_regressions_not_additive": [
+    {
+      "passed": 575,
+      "duration_seconds": 106.83
+    },
+    {
+      "passed": 578,
+      "duration_seconds": 108.01
+    }
+  ],
+  "ui_validation": "STREAMLIT_APPTEST",
+  "embedding_validation": "SYNTHETIC_DOUBLES_AND_HTTPX_MOCKTRANSPORT",
+  "live_embedding_calls": "NOT_RUN",
+  "live_daily_incident_resolution": "NOT_RUN",
+  "new_real_browser_validation": "NOT_RUN",
+  "service_deployment_or_recovery": "NOT_RUN",
+  "source_byte_sha256": {
+    "tracebridge/control_plane.py": "5452f3420d8cf47bf3e11f14f131138e5703270891ece90db029865eed656f25",
+    "tracebridge/incident_memory.py": "4eb75dbc2d89a8c87e4e2ed167e6ed5e615c190da93c5b17d71f70b924fe7604",
+    "tracebridge/local_runner.py": "9f374114a8b01d401e2f187e97340e18e0ab635321674a2bf94865cbf1a9062d",
+    "tracebridge/report_agent.py": "d5c61942958f265133ce2afb7437971e885685736f33c95c6808ec7bb3aa5c9c",
+    "tracebridge/semantic_memory.py": "908c3475332f031c91c558a823f2002845bb594a552fc6b300c1b06d93d142fe",
+    "tracebridge/work_management.py": "6306f774037d2ae9a5c63bb207069c9787ae11e7a6033ff17538243aea60704b",
+    "tracebridge/work_management_ui.py": "eba6ef0be03032228093e7324b45041d908f4a96ace903f96e6cea7f24e742ad",
+    "pages/3_Remote_Projects.py": "7bf46a305fbc7336a3be70386d9a895a868ebc07ce6799d7790b68281f86888f",
+    "scripts/incident_memory.py": "18b9ea4e61c5998a4f3385fbb8c3d04b9e6bcd55b399e56818fc604b84d0387a",
+    "scripts/evaluate_memory_retrieval.py": "850fb96b3ce0e3a570f436b0b9023c39380b09d1ebd0318da8926ef96ced636b",
+    "tests/test_control_plane.py": "bfefe14ff2ec5e5003a9e369a56c9a8a9e726a5af32b4f56d85bcd4a0b799a68",
+    "tests/test_semantic_memory.py": "c663fb74f321eabeeeaea527101da0a88b9e6a4a3d5cfedd69f99d15f334474c",
+    "tests/test_work_management.py": "d0dde2c1eeced83115dd22a4779a2d3a857f622fb36162b8042e6b8c682a73b5",
+    "deploy/app.env.example": "d0c97b41b126d8ccda42a52f1dd0aa61189c0a66b4aa8f5398833757c4b0a248"
+  },
+  "limitations": [
+    "Owner-assigned assessments; automatic priority/difficulty/risk estimation remains future work.",
+    "SQLite exact cosine scan up to 500 scoped vectors; not ANN or an independently deployed vector database.",
+    "No claim of real embedding quality, cause/fix improvement, cost or time superiority.",
+    "Running web/API/runner instances require restart to use the changes."
+  ]
+}

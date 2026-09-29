@@ -45,7 +45,8 @@ class ControlClient:
         headers = {"Authorization": "Bearer " + self.token} if self.token else {}
         if idempotency_key:
             headers["Idempotency-Key"] = idempotency_key
-        options = {} if hasattr(self.client, "app") else {"timeout": 100 if path.endswith("/model") else 10}
+        timeout = 100 if path.endswith("/model") else 35 if path.endswith("/index") else 20 if path.endswith("/memory") else 10
+        options = {} if hasattr(self.client, "app") else {"timeout": timeout}
         response = self.client.request(method, self.url + path, json=payload, headers=headers, **options)
         if not response.is_success:
             try:
@@ -156,16 +157,22 @@ class LocalRunner:
             health = inspect_project(profile)
             from .project_repair import load_repair_policy
             enabled_ids = []
+            recovery_policies = {}
             for id_ in profile.policy_refs:
                 try:
-                    policy, _ = load_repair_policy(profile, id_)
+                    policy, digest = load_repair_policy(profile, id_)
                     if policy.enabled:
                         enabled_ids.append(id_)
+                        if policy.recovery:
+                            recovery_policies[id_] = {"policy_sha256": digest, "spec": policy.recovery.model_dump()}
                 except (ValueError, OSError):
                     continue
             self.api.request("PUT", "/v1/runner/manifest", {"project_id": profile.project_id, "environment": profile.environment,
                 "service_ids": [item.id for item in profile.services] or [profile.service], "repository_ids": [item.id for item in profile.repositories],
-                "profile_sha256": sha256(profile.config_path.read_bytes()), "repair_enabled": bool(enabled_ids), "repair_policy_ids": enabled_ids, "status": health["status"]})
+                "profile_sha256": sha256(profile.config_path.read_bytes()), "repair_enabled": bool(enabled_ids), "repair_policy_ids": enabled_ids, "status": health["status"],
+                "recovery_policy_ids": list(recovery_policies), "recovery_policies": recovery_policies,
+                "service_health": {item["id"]: item["service_status"] for item in health["services"]},
+                "health_checked_at": datetime.now(timezone.utc).isoformat()})
         self.last_manifest = time.monotonic()
 
     def _guard(self):
@@ -197,6 +204,7 @@ class LocalRunner:
         self.flush_outbox()
         if not self.profiles or time.monotonic() - self.last_manifest > 30:
             self.publish_profiles()
+        self.flush_applications()
         capabilities = self.api.request("POST", "/v1/runner/heartbeat", {})
         self.model = capabilities.get("model", self.model)
         job = self.api.request("POST", "/v1/runner/jobs/claim", {})["job"]
@@ -234,6 +242,14 @@ class LocalRunner:
                     if result["job"].get("diff", {}).get("ref"):
                         from .project_repair_ui import candidate_diff
                         result["diff_preview"] = candidate_diff(result["job"])
+                elif job["kind"] == "verify_recovery":
+                    from .project_recovery import recovery_configuration, verify_project_recovery
+                    _, policy, digest = recovery_configuration(profile, payload["application"], previous)
+                    if digest != payload["policy_sha256"] or policy.recovery.model_dump() != payload["recovery_spec"]:
+                        raise ValueError("Recovery assignment differs from the owner-registered policy")
+                    result = verify_project_recovery(profile, payload["application"]["work_id"], db_path=self.db_path,
+                        source=previous, result_run_id=payload["run_id"], execution_guard=self._guard)
+                    result["candidate_job_id"] = payload["candidate_job_id"]
                 else:
                     def memory_lookup(project_id, query, **kwargs):
                         self._guard()
@@ -243,6 +259,7 @@ class LocalRunner:
                     result = investigate_submission(payload["text"], project_profile=profile, context=context,
                         use_nvidia=payload["use_nvidia"], client=gateway, db_path=self.db_path,
                         memory_enabled=payload["memory_enabled"], memory_lookup=memory_lookup,
+                        max_seconds=payload.get("investigation_max_seconds", 90),
                         previous_result=previous, run_id=payload["run_id"], incident_id=payload["incident_id"], message_received_at=payload["received_at"])
                 result_path.write_bytes(json.dumps(result, ensure_ascii=False).encode())
             except Exception as exc:
@@ -275,6 +292,34 @@ class LocalRunner:
                 self.active = None
             except GatewayError as exc:
                 if exc.status_code != 409:
+                    raise
+
+    def flush_applications(self):
+        """Report durable PC receipts, including receipts saved before this runner upgrade."""
+        from .project_lifecycle import list_applications
+        candidates = {}
+        for path in self.state_directory.glob("*.result.json"):
+            result = json.loads(path.read_bytes())
+            change = result.get("job", {})
+            if change.get("record_format") == "project_change_job_v1":
+                candidates[(change["project_id"], change["work_id"])] = path.name.removesuffix(".result.json")
+        with IncidentStore(self.db_path) as store:
+            applications = [item for project in self.project_ids for item in list_applications(store, project)]
+        for application in applications:
+            job_id = candidates.get((application["project_id"], application["work_id"]))
+            if not job_id:
+                continue
+            ack = self.state_directory / (application["work_id"] + ".application-ack.json")
+            digest = sha256(json.dumps(application, sort_keys=True, ensure_ascii=False).encode())
+            if ack.exists() and json.loads(ack.read_bytes()).get("sha256") == digest:
+                continue
+            try:
+                self.api.request("POST", f"/v1/runner/projects/{application['project_id']}/applications",
+                    {"candidate_job_id": job_id, "application": application})
+                ack.write_text(json.dumps({"sha256": digest}), encoding="utf-8")
+            except GatewayError as exc:
+                # Preserve a conflicted receipt for owner review; never apply source again.
+                if exc.status_code not in (403, 409, 422):
                     raise
 
     def run(self):

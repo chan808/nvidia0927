@@ -33,8 +33,11 @@ def profile_data(profile: ProjectProfile) -> dict:
     for name in ("openapi_path", "dto_path", "caller_evidence_path"):
         if getattr(profile, name):
             data[name] = str(getattr(profile, name))
+    if profile.health_url:
+        data["health_url"] = profile.health_url
     if profile.services:
         data["services"] = [{"id": item.id, "log_source_ids": list(item.log_source_ids), "version_observation": version(item.version_observation),
+            **({"health_url": item.health_url} if item.health_url else {}),
             **{name: str(getattr(item, name)) for name in ("openapi_path", "dto_path", "caller_evidence_path") if getattr(item, name)}} for item in profile.services]
     return data
 

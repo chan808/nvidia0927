@@ -1,0 +1,80 @@
+{
+  "format": "tracebridge_publication_review_v1",
+  "recorded_at": "2026-09-29T11:01:58.838123+00:00",
+  "status": "PASSED",
+  "unchanged_application_regression": {
+    "passed": 689,
+    "real_postgres_cases": 32,
+    "reference": "project-recovery.json"
+  },
+  "post_cleanup_tests": {
+    "passed": 24,
+    "elapsed_seconds": 12.71,
+    "files": [
+      "tests/test_storage_contract.py",
+      "tests/test_submission_package.py",
+      "tests/test_service_readiness.py"
+    ]
+  },
+  "pip_check": "PASSED",
+  "source_review": {
+    "files": 297,
+    "python_syntax_files": 128,
+    "local_document_links": 425,
+    "broken_links": [],
+    "credential_findings": [],
+    "allowed_fake_credential_fixtures": [
+      {
+        "path": "tests/test_project_investigation.py",
+        "kind": "NVIDIA",
+        "status": "EXPLICIT_REDACTION_TEST_FIXTURE"
+      },
+      {
+        "path": "tests/test_project_investigation.py",
+        "kind": "NVIDIA",
+        "status": "EXPLICIT_REDACTION_TEST_FIXTURE"
+      }
+    ],
+    "changed_since_689_tests": [],
+    "daily_authored_files": 13,
+    "daily_changed_since_validation": []
+  },
+  "wheel": {
+    "status": "PASSED",
+    "source_files_matched": 53,
+    "migration_files": [
+      "tracebridge/storage/alembic/env.py",
+      "tracebridge/storage/alembic/versions/20260929_01_central_storage.py",
+      "tracebridge/storage/alembic/versions/20260929_02_rag_jobs.py",
+      "tracebridge/storage/alembic/versions/20260929_03_scoped_references.py"
+    ],
+    "wheel_filename": "tracebridge_demo-0.1.0-py3-none-any.whl",
+    "wheel_sha256": "3d1264090a50e046226c678ebecffee907c417c2b7524e221fdcd730d0dde6c7",
+    "network_used": false,
+    "fresh_environment_install_verified": false
+  },
+  "removed_unused_configuration": [
+    "alembic.ini"
+  ],
+  "untracked_local_artifacts": [
+    "output/independent-review-478db4531b/TraceBridge-hackathon-review-ko.md",
+    "output/independent-review-478db4531b/log-truncation-probes.json",
+    "output/independent-review-478db4531b/offline-probes.json",
+    "output/independent-review-478db4531b/probe_log_truncation.py",
+    "output/independent-review-478db4531b/pytest-final-output.txt",
+    "output/independent-review-478db4531b/pytest-final-results.xml",
+    "output/independent-review-478db4531b/snapshot-final-manifest.json"
+  ],
+  "local_artifacts_preserved": true,
+  "publication_scope": "chan808/nvidia0927:main",
+  "daily_prior_unpublished_commits": 39,
+  "daily_publication_performed": false,
+  "automatic_deployment_performed": false,
+  "documentation_sha256": {
+    "docs/guides/verification.md": "b014fd5b48e729b22e1cfae27248c2b40b138b41d4f3b4276271839aef931b6c",
+    "docs/guides/getting-started.md": "b0b15c4ea450a75bfbc1d361a3854a52e411862fb7d222f2f6bb52e866fe65cd",
+    "docs/guides/daily-observation.md": "14a1084db4bd86db63caf6ec131dc7bc4ba7976c0b50183beb8e63b86d39b8ef",
+    "docs/validation/daily-observation.md": "f184b259ca8f11bb54a653816347744dde33064ee7730d7b785498794da277cd",
+    "docs/validation/publication-review.md": "06fd408eb0905021c89600fb7018209e0160a5ee7d244aec97a58f1396c60e89"
+  }
+}

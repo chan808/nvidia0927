@@ -1,0 +1,159 @@
+{
+  "recorded_at": "2026-09-29T07:51:43.596419+00:00",
+  "format": "tracebridge_daily_observation_v1",
+  "tests": {
+    "tracebridge_passed": 650,
+    "tracebridge_seconds": 175.86,
+    "real_postgres_cases": 30,
+    "daily_frontend_passed": 233,
+    "daily_support_passed": 7,
+    "daily_architecture_passed": 6,
+    "frontend_typecheck": "PASSED",
+    "frontend_build": "PASSED",
+    "backend_jar": "PASSED",
+    "docs_check": "PASSED"
+  },
+  "integration": {
+    "proxy_http_status": 400,
+    "proxy_error_code": "VALIDATION_FAILED",
+    "request_id": "daily-check-b74ac8c7f4e74b528b681439e5769acf",
+    "job_id": "8d7e00fd4e4f46cabc61a20fe87806f6",
+    "job_state": "SUCCEEDED",
+    "correlation": "EXACT_ID",
+    "route": "INVESTIGATE",
+    "model_calls": 0,
+    "build_sha": "c5803d01b678f14dfb931852b5c458076b45a3bb",
+    "source_dirty": true,
+    "service_health_during_check": {
+      "backend": "UP",
+      "frontend": "REACHABLE"
+    }
+  },
+  "preservation": {
+    "existing_control_jobs_unchanged": 2,
+    "sqlite_integrity": "PASSED",
+    "sqlite_foreign_keys": "PASSED",
+    "daily_original_apply_allowed": false,
+    "central_postgres_cutover": false,
+    "preexisting_next_env_restored": true
+  },
+  "sources": {
+    "tracebridge": {
+      "pages/2_Report_Agent.py": {
+        "sha256": "fa79dd0af10609b2660a2c22b2a9d61e112e8898a7953858f5c0fdd608d983fa",
+        "bytes": 25827
+      },
+      "pages/3_Remote_Projects.py": {
+        "sha256": "49e2fc342be877591ae8d96e1da0e79044f0f738f3c086dcce5e24fccd9b370f",
+        "bytes": 12039
+      },
+      "scripts/connect_daily.py": {
+        "sha256": "de2a247afbcd3aee881c09f71052705c62812485677651c1e215ed5f6d7cc30d",
+        "bytes": 1383
+      },
+      "scripts/verify_daily_observation.py": {
+        "sha256": "3134aadca401400d2f2ed2bfe84b7228beb5d6184b71621d019403ec9012b937",
+        "bytes": 4899
+      },
+      "tests/test_daily_observation.py": {
+        "sha256": "562038889674fc2ca4038904c566f5c026f2f53692f068b4af1bf290579d5b52",
+        "bytes": 7665
+      },
+      "tracebridge/control_plane.py": {
+        "sha256": "f251258f02618e230cb51f14e2dda0331690195ad29c960d4a7cdbbe146e1a9a",
+        "bytes": 37858
+      },
+      "tracebridge/daily_observation.py": {
+        "sha256": "93cd29d93d35151a7418047a6e2f390154811f79f7f07d7b3fa59496787f17c0",
+        "bytes": 8340
+      },
+      "tracebridge/local_runner.py": {
+        "sha256": "69e57512db846b01b358dc52f0a95499f6ae71846ef702b88d61a4d65c021a12",
+        "bytes": 15279
+      },
+      "tracebridge/project_health.py": {
+        "sha256": "0e1903e16b270f0c922bbcb7e11e36e2ccaafd1ae753bdff91ccaada610edd9b",
+        "bytes": 4577
+      },
+      "tracebridge/project_profile.py": {
+        "sha256": "4994be816dc03cbf5a6e526dd44620d30be6551a17dce41fbe7c0c712be8136a",
+        "bytes": 26180
+      },
+      "tracebridge/project_registry.py": {
+        "sha256": "d5a52085d4c6405422fe517b707f6e6a879651cea34506c039285c79235d9aab",
+        "bytes": 3974
+      },
+      "tracebridge/project_sources.py": {
+        "sha256": "df4acd7af00fa1378d0f88b421c17fe567d5eb340672dfde193b048bd99fe34a",
+        "bytes": 48834
+      }
+    },
+    "daily": {
+      ".gitignore": {
+        "sha256": "eefe9ab5e4f2ac93a084baf91e2b5e0f1787e2fba5b7cdc2ba3fee417d73655a",
+        "bytes": 803
+      },
+      "backend/app/build.gradle.kts": {
+        "sha256": "36afe2c2c1accd1cfabf9419def6f4e8d7725882c45fec370834fe391f94504b",
+        "bytes": 3046
+      },
+      "backend/app/src/main/resources/application-local.yml": {
+        "sha256": "af5a64b5da11c9d0995b2c8e79bdde0f9fe2f9a9af5f28ec5c38bf77d0e2489e",
+        "bytes": 400
+      },
+      "backend/app/src/main/resources/logback-spring.xml": {
+        "sha256": "3137fd9c7536156d568c9584d39a917e0b136d12f70de43fdb0739199e095773",
+        "bytes": 2020
+      },
+      "backend/platform/support/src/main/kotlin/dev/daily/support/web/GlobalExceptionHandler.kt": {
+        "sha256": "b930973c2974e5daba0d2d3e22b689c99bf789054a89303c4998b675fa597396",
+        "bytes": 5265
+      },
+      "backend/platform/support/src/main/kotlin/dev/daily/support/web/RequestIdFilter.kt": {
+        "sha256": "fe6702e27a6de6cd63fc99c0ea8ed6f4ab3837e1039e8488d006eb3fafa031ca",
+        "bytes": 2784
+      },
+      "backend/platform/support/src/main/kotlin/dev/daily/support/web/RequestObservation.kt": {
+        "sha256": "2d583b08ffc004caf985e08fee66467c2d4f96eee07f722cbf992819221e7a0c",
+        "bytes": 5880
+      },
+      "backend/platform/support/src/test/kotlin/dev/daily/support/web/RequestObservationTest.kt": {
+        "sha256": "119d75a8b5cf869decf35d96aac74915b513491bd71ce8596d20096a4c6bad9b",
+        "bytes": 5478
+      },
+      "docs/operations.md": {
+        "sha256": "d0734f0ea59e4b23c6e27cb2621558cec1b98f890b13d76909655c67c277e7fb",
+        "bytes": 72329
+      },
+      "frontend/next.config.ts": {
+        "sha256": "79db49f17fffcbc154dbd98ca9157591a981d85c4e4dbc0a6bb6037ab124e7d1",
+        "bytes": 1722
+      },
+      "frontend/src/lib/api.ts": {
+        "sha256": "c970b3749ac6f0128710a03407407e414deec68c4e5fcb66ca8034e2daeb8c8d",
+        "bytes": 19483
+      },
+      "frontend/src/lib/request-observation.test.ts": {
+        "sha256": "b8b781f970bd503d4c46b95b14939a55f57bd648467b38956a96908784295cfb",
+        "bytes": 3448
+      },
+      "frontend/src/lib/request-observation.ts": {
+        "sha256": "d7ae12e53cdf2882ed8d661442430f252cb13945c225e3962cc312ee1e458b91",
+        "bytes": 1925
+      }
+    }
+  },
+  "limitations": [
+    "Controlled development HTTP validation failure; no reported production defect was solved",
+    "Only development-login has a source-derived contract snapshot",
+    "Caller browser runtime/input attribution remains unobserved",
+    "Full daily Docker/Testcontainers suite and live browser manipulation were not exercised",
+    "Automatic deployment, recovery, organization authentication and embedding quality are outside this change"
+  ],
+  "cleanup": {
+    "validation_users": 0,
+    "validation_tasks": 0,
+    "validation_database_removed": true,
+    "verification_cluster_stopped": true
+  }
+}

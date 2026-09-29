@@ -1,0 +1,68 @@
+# Combine with compose.yaml and control-plane.compose.yaml after migration parity.
+# This image tag/digest was resolved from the official pgvector repository.
+services:
+  postgres:
+    image: ${TRACEBRIDGE_POSTGRES_IMAGE:-pgvector/pgvector:0.8.6-pg18-bookworm@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tracebridge
+      POSTGRES_DB: tracebridge
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
+    secrets:
+      - postgres-password
+    volumes:
+      - tracebridge_postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "tracebridge", "-d", "tracebridge"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 1g
+    cpus: 1
+    pids_limit: 256
+    stop_grace_period: 60s
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+  control:
+    environment:
+      TRACEBRIDGE_DATABASE_URL_FILE: /run/secrets/database-url
+    secrets:
+      - database-url
+    depends_on:
+      postgres:
+        condition: service_healthy
+  memory-worker:
+    image: ${TRACEBRIDGE_IMAGE:-tracebridge:preview}
+    profiles: ["rag"]
+    command: ["python", "-m", "scripts.memory_worker"]
+    restart: unless-stopped
+    init: true
+    env_file:
+      - ${TRACEBRIDGE_APP_ENV_FILE:-./app.env}
+    environment:
+      TRACEBRIDGE_DATABASE_URL_FILE: /run/secrets/database-url
+    secrets:
+      - database-url
+    depends_on:
+      control:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=67108864,mode=1777
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1g
+    cpus: 1
+    pids_limit: 128
+    stop_grace_period: 45s
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+volumes:
+  tracebridge_postgres_data:
+secrets:
+  postgres-password:
+    file: ${TRACEBRIDGE_POSTGRES_PASSWORD_FILE:?Set a private PostgreSQL password file}
+  database-url:
+    file: ${TRACEBRIDGE_DATABASE_URL_SECRET_FILE:?Set a private PostgreSQL URL file}

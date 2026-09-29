@@ -1055,13 +1055,16 @@ def investigate_submission(
         }
         observed_signals, reported_signals = current_signals(memory_current), signals_from_text(report)
         search_signals = {key: list(dict.fromkeys([*observed_signals[key], *reported_signals[key]]))[:8] for key in observed_signals}
+        retrieval_scope = {key: value for key, value in memory_current.get("scope", {}).items()
+                           if key in {"service", "environment"} and value}
         if memory_lookup:
             try:
-                memory_search = memory_lookup(project_id, report[:12000], signals=search_signals, exclude_incident_id=result["incident_id"], enabled=True)
+                memory_search = memory_lookup(project_id, report[:12000], signals=search_signals, exclude_incident_id=result["incident_id"], enabled=True, scope_filters=retrieval_scope)
             except Exception as exc:
                 memory_search = {"status": "FAILED", "hit_count": 0, "cards": [], "error_type": type(exc).__name__}
         else:
-            memory_search = search_memory(project_id, report[:12000], signals=search_signals, exclude_incident_id=result["incident_id"], db_path=db_path, enabled=memory_enabled)
+            memory_search = search_memory(project_id, report[:12000], signals=search_signals, exclude_incident_id=result["incident_id"], db_path=db_path, enabled=memory_enabled,
+                scope_filters=retrieval_scope, semantic_enabled=use_nvidia)
         memory_search = recheck_memory(memory_search, memory_current)
     else:
         memory_search = {"status": "SKIPPED_TIME_BUDGET", "hit_count": 0, "cards": [], "elapsed_ms": 0}

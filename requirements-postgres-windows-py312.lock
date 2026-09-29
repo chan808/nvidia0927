@@ -1,0 +1,8 @@
+# Observed optional PostgreSQL closure; Windows amd64 / CPython 3.12.7.
+# Install with requirements-windows-py312.lock and optional service/test locks.
+# Exact versions; no wheel hashes or fresh-environment validation claimed.
+alembic==1.20.0
+Mako==1.4.3
+pgvector==0.4.2
+psycopg==3.3.6
+psycopg-binary==3.3.6

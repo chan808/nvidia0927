@@ -6,9 +6,13 @@ from pathlib import Path
 import sqlite3
 import sys
 
+import httpx
+
 from dotenv import load_dotenv
 
 from tracebridge.incident_memory import IncidentStore, search_memory
+from tracebridge.storage import configured_target, open_control_store
+from sqlalchemy.exc import SQLAlchemyError
 
 
 def main() -> None:
@@ -16,6 +20,7 @@ def main() -> None:
     load_dotenv(Path(__file__).resolve().parents[1] / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path, help="SQLite file; default is output/tracebridge/incidents.sqlite3")
+    parser.add_argument("--central", action="store_true", help="Use the configured private central PostgreSQL (owner administration)")
     parser.add_argument("--project", required=True, help="Required local project scope; not authentication")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("list", help="List up to 50 recent incidents")
@@ -33,18 +38,48 @@ def main() -> None:
     search = commands.add_parser("search", help="Exact fields first, then lexical FTS5; at most two reviewed cards")
     search.add_argument("--query", default="")
     search.add_argument("--disable-memory", action="store_true", help="Return DISABLED without opening the DB; saving remains available")
+    search.add_argument("--service", help="Only cards from this observed service")
+    search.add_argument("--environment", help="Only cards from this observed environment")
+    search.add_argument("--semantic", action="store_true", help="Also send the redacted query to the explicitly configured embedding service")
     for name in ("error-code", "path", "exception", "stack-fingerprint"):
         search.add_argument("--" + name, action="append", default=[])
     save = commands.add_parser("save", help="Retry saving an existing JSON result; no investigation or model call")
     save.add_argument("--file", type=Path, required=True)
+    index = commands.add_parser("index", help="Embed approved/edited incident summaries using the configured NIM service")
+    index.add_argument("--limit", type=int, default=50)
+    index.add_argument("--allow-embedding-transmission", action="store_true", help="Explicitly allow sending reviewed, redacted summaries to the configured service")
     args = parser.parse_args()
+    storage = None
     try:
+        if args.central:
+            if args.db is not None:
+                raise ValueError("Choose --central or --db")
+            target = configured_target()
+            if not target:
+                raise ValueError("Configure the central database URL first")
+            storage = open_control_store(target)
+            if not storage.postgres:
+                raise ValueError("--central requires PostgreSQL")
+            args.db = storage.incident_target
         if args.command == "search":
             signals = {"error_codes": args.error_code, "paths": args.path, "exceptions": args.exception, "stack_fingerprints": args.stack_fingerprint}
             result = search_memory(args.project, args.query, signals=signals if any(signals.values()) else None,
-                db_path=args.db, enabled=not args.disable_memory)
+                db_path=args.db, enabled=not args.disable_memory,
+                scope_filters={key: value for key, value in {"service": args.service, "environment": args.environment}.items() if value},
+                semantic_enabled=args.semantic)
             if result["status"] == "FAILED":
                 parser.error("Memory search failed: " + result["error_type"])
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return
+        if args.command == "index":
+            if not args.allow_embedding_transmission:
+                parser.error("Indexing requires --allow-embedding-transmission")
+            from tracebridge.semantic_memory import embedding_client_from_env, index_reviewed_cards
+            provider = embedding_client_from_env()
+            if provider is None:
+                parser.error("Explicitly configure TRACEBRIDGE_EMBEDDINGS_ENABLED, embedding URL and model first")
+            with IncidentStore(args.db) as store:
+                result = index_reviewed_cards(store, args.project, provider, limit=args.limit)
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return
         with IncidentStore(args.db) as store:
@@ -73,8 +108,11 @@ def main() -> None:
                 if not isinstance(result, dict) or result.get("project_id") != args.project:
                     raise ValueError("Saved result project scope mismatch")
                 result = {"status": store.save_run(result), "run_id": result["run_id"]}
-    except (OSError, ValueError, sqlite3.Error, TypeError, KeyError) as exc:
-        parser.error(str(exc))
+    except (OSError, ValueError, sqlite3.Error, SQLAlchemyError, TypeError, KeyError, httpx.HTTPError) as exc:
+        parser.error(type(exc).__name__ if args.command == "index" else str(exc))
+    finally:
+        if storage is not None:
+            storage.close()
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

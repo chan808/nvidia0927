@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+from urllib.parse import urlsplit
 from typing import Any
 
 from .contract_analysis import _type_name
@@ -48,6 +49,7 @@ class RegisteredService:
     dto_path: Path | None = None
     caller_evidence_path: Path | None = None
     version_observation: VersionObservation = VersionObservation()
+    health_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -66,6 +68,7 @@ class ProjectProfile:
     config_path: Path | None = None
     repositories: tuple[RegisteredRepository, ...] = ()
     services: tuple[RegisteredService, ...] = ()
+    health_url: str | None = None
 
 
 def select_project_service(profile: ProjectProfile, service: str | None = None) -> ProjectProfile:
@@ -80,7 +83,26 @@ def select_project_service(profile: ProjectProfile, service: str | None = None) 
     return replace(profile, service=target,
         log_sources=tuple(item for item in profile.log_sources if item.id in entry.log_source_ids),
         openapi_path=entry.openapi_path, dto_path=entry.dto_path,
-        caller_evidence_path=entry.caller_evidence_path, version_observation=entry.version_observation)
+        caller_evidence_path=entry.caller_evidence_path, version_observation=entry.version_observation,
+        health_url=entry.health_url)
+
+
+def _health_url(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or len(value) > 512:
+        raise EvidenceError("Health URL must be a bounded loopback HTTP URL")
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError as exc:
+        raise EvidenceError("Invalid health URL") from exc
+    if (parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
+            or parsed.username or parsed.password or parsed.query or parsed.fragment
+            or not parsed.path.startswith("/") or port is None or not 1 <= port <= 65535
+            or any(char.isspace() for char in value)):
+        raise EvidenceError("Health URL accepts loopback HTTP with an explicit port, without credentials or queries")
+    return value
 
 
 def _text(value: Any, name: str) -> str:
@@ -155,6 +177,7 @@ def load_project_profile(path: str | Path) -> ProjectProfile:
     allowed = {
         "project_id", "service", "environment", "root", "code_roots", "log_sources",
         "openapi_path", "dto_path", "caller_evidence_path", "version_observation", "policy_refs", "repositories", "services",
+        "health_url",
     }
     if not isinstance(data, dict) or set(data) - allowed:
         raise EvidenceError("Project profile contains unsupported settings (including execution or secrets)")
@@ -237,7 +260,7 @@ def load_project_profile(path: str | Path) -> ProjectProfile:
         raise EvidenceError("services must contain at most 16 registered services")
     services = []
     for entry in service_entries:
-        if not isinstance(entry, dict) or set(entry) - {"id", "log_source_ids", "openapi_path", "dto_path", "caller_evidence_path", "version_observation"}:
+        if not isinstance(entry, dict) or set(entry) - {"id", "log_source_ids", "openapi_path", "dto_path", "caller_evidence_path", "version_observation", "health_url"}:
             raise EvidenceError("Service accepts id/log_source_ids/contract paths/version observation only")
         id_ = _text(entry.get("id"), "Service id")
         ids = entry.get("log_source_ids", [item.id for item in sources if item.service == id_])
@@ -255,7 +278,8 @@ def load_project_profile(path: str | Path) -> ProjectProfile:
         if observed_field.casefold() in {"token", "password", "secret", "authorization", "api_key"} or observed_method != "json_file" and "path" in observed:
             raise EvidenceError("Unsupported service version field/path")
         observed_path = registered_path(resolver, observed.get("path")) if observed_method == "json_file" else None
-        services.append(RegisteredService(id_, tuple(ids), version_observation=VersionObservation(observed_method, observed_path, observed_field), **paths))
+        services.append(RegisteredService(id_, tuple(ids), version_observation=VersionObservation(observed_method, observed_path, observed_field),
+                                          health_url=_health_url(entry.get("health_url")), **paths))
     if len({item.id for item in services}) != len(services) or services and data.get("service") not in {item.id for item in services}:
         raise EvidenceError("Service ids must be unique and include the primary service")
     return ProjectProfile(
@@ -264,7 +288,8 @@ def load_project_profile(path: str | Path) -> ProjectProfile:
         code_roots=tuple(_local_path(root, entry) for entry in code_roots), log_sources=tuple(sources),
         version_observation=VersionObservation(method, registered_path(resolver, version.get("path")) if method == "json_file" else None,
                                                _text(version.get("field", "version"), "Version field")),
-        policy_refs=tuple(policies), config_path=config_path, repositories=tuple(registered), services=tuple(services), **optional,
+        policy_refs=tuple(policies), config_path=config_path, repositories=tuple(registered), services=tuple(services),
+        health_url=_health_url(data.get("health_url")), **optional,
     )
 
 
@@ -416,6 +441,12 @@ def observe_project_version(profile: ProjectProfile) -> dict:
                                                  for key in ("project_id", "service", "environment")):
                 raise EvidenceError("Version snapshot scope does not match the project")
             result.update(source=str(path), sha256=digest)
+            build = data.get("build", {})
+            if isinstance(build, dict) and build.get("source") == "spring_boot_build_info":
+                result["build_source"] = "spring_boot_build_info"
+                dirty = build.get("source_dirty")
+                result["source_tree_dirty"] = dirty == "true" if isinstance(dirty, str) and dirty in {"true", "false"} else None
+                result["limitations"].append("Startup file records an embedded build; current service availability is checked separately")
             for target in ("runtime_version", "code_version"):
                 value = data.get(target)
                 if isinstance(value, str) and value.strip() and _type_name(value) is not None:

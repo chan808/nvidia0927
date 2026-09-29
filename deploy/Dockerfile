@@ -24,7 +24,7 @@ COPY pyproject.toml README.md ./
 COPY tracebridge/ ./tracebridge/
 # The optional test dependency is needed by the existing fixture demo's
 # bounded reproduction commands; it is not the Windows test lock file.
-RUN python -m pip install --no-cache-dir ".[test,service]" \
+RUN python -m pip install --no-cache-dir ".[test,service,postgres]" \
     && python -m pip check \
     && python -c "import sqlite3; c=sqlite3.connect(':memory:'); c.execute('CREATE VIRTUAL TABLE check_fts USING fts5(body)'); import tracebridge.report_agent"
 

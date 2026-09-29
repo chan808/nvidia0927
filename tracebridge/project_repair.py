@@ -30,6 +30,7 @@ from .incident_memory import IncidentStore, db_location
 from .project_profile import ProjectProfile, load_project_profile, select_project_service
 from .project_registry import registry_directory
 from .project_sources import redact, repository_revision, source_tree_dirty, SOURCE_SUFFIXES
+from .recovery_contract import RecoverySpec
 
 
 SKIP_DIRECTORIES = {".git", ".venv", "venv", "node_modules", ".next", ".gradle", ".kotlin", "build", "dist", "target", "__pycache__", ".pytest_cache", ".idea", ".vscode", "output", "generated"}
@@ -72,6 +73,7 @@ class ProjectRepairPolicy(BaseModel):
     max_changed_lines: int = Field(default=160, ge=1, le=500)
     max_proposal_bytes: int = Field(default=60_000, ge=100, le=150_000)
     max_seconds: int = Field(default=240, ge=15, le=1800)
+    recovery: RecoverySpec | None = None
 
 
 class FileEdit(BaseModel):
@@ -677,7 +679,8 @@ def prepare_project_change(source: dict, profile: ProjectProfile | str | Path, *
                 candidate, diff = _apply_proposal(raw, context, baseline, policy)
                 diff_path = artifact / "candidate.diff"
                 diff_path.write_bytes(diff.encode("utf-8"))
-                job["diff"] = {"ref": str(diff_path), "sha256": sha256(diff.encode()), "bytes": len(diff.encode())}
+                job["diff"] = {"ref": str(diff_path), "sha256": sha256(diff.encode()), "bytes": len(diff.encode()),
+                    "paths": sorted(name for name in candidate if candidate[name] != baseline[name])}
                 for name, content in candidate.items():
                     if content != baseline[name]:
                         _checked_path(candidate_path, name).write_bytes(content)
@@ -769,21 +772,9 @@ def _save_application(application: dict, db_path) -> dict:
     import sqlite3
     try:
         with IncidentStore(db_path) as store:
-            store.connection.execute("CREATE TABLE IF NOT EXISTS project_applications (work_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, record_json TEXT NOT NULL)")
-            with store.connection:
-                store.connection.execute("BEGIN IMMEDIATE")
-                old = store.connection.execute("SELECT record_json FROM project_applications WHERE work_id=? AND project_id=?", (application["work_id"], application["project_id"])).fetchone()
-                if old:
-                    if json.loads(old[0])["run"]["run_id"] != application["run"]["run_id"]:
-                        raise PolicyDenied("다른 적용 기록이 이미 있습니다")
-                    application["persistence"] = {"status": "ALREADY_SAVED"}
-                    return application
-                latest = store.get_incident(application["project_id"], application["run"]["incident_id"])
-                if latest["latest_run_id"] != application["source_run_id"]:
-                    raise PolicyDenied("최신 사건 기록과 적용 출처가 다릅니다")
-                store._insert_run(application["run"])
-                store.connection.execute("INSERT INTO project_applications VALUES (?,?,?)", (application["work_id"], application["project_id"], json.dumps(application, ensure_ascii=False)))
-        application["persistence"] = {"status": "SAVED"}
+            from .project_lifecycle import save_application
+            status = save_application(store, application)
+        application["persistence"] = {"status": status}
     except (OSError, sqlite3.Error, ValueError, KeyError, TypeError) as exc:
         application["persistence"] = {"status": "FAILED", "error_type": type(exc).__name__}
     return application
@@ -863,13 +854,10 @@ def apply_project_change(project_id: str, work_id: str, profile: ProjectProfile 
         finally:
             for path in temporary_paths:
                 path.unlink(missing_ok=True)
-        run = deepcopy(prepared_run)
-        run.update(run_id=uuid4().hex, revision=prepared_run["revision"] + 1, executed_at=datetime.now(timezone.utc).isoformat(),
-            fix_applied=True, fix_verified=False, cause_confirmed=False, run_status="COMPLETED", stop_reason="reviewed_candidate_applied",
-            summary="검토한 후보를 동일한 원본 snapshot에 적용했습니다. 서비스 재기동·배포·회복 확인은 별도입니다.")
-        run["change"].update(original_applied=True, verification_scope="REGISTERED_PROJECT_SNAPSHOT_ONLY")
+        from .project_lifecycle import application_run
+        run = application_run(prepared_run, uuid4().hex, datetime.now(timezone.utc).isoformat())
         application = {"project_id": project_id, "work_id": work_id, "source_run_id": prepared_run["run_id"], "diff_sha256": expected_diff_sha256,
             "status": "APPLIED", "paths": changed, "source_snapshot_sha256": job["baseline"]["snapshot_sha256"],
-            "applied_snapshot_sha256": job["candidate"]["snapshot_sha256"], "deployment_status": "NOT_ATTEMPTED", "service_recovery": "NOT_VERIFIED", "run": run}
+            "applied_snapshot_sha256": job["candidate"]["snapshot_sha256"], "deployment_status": "NOT_ATTEMPTED", "service_recovery": "NOT_VERIFIED", "policy": job["policy"], "run": run}
         application_path.write_bytes(json_bytes(application))
     return _save_application(application, db_path)

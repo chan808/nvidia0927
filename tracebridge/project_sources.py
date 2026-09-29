@@ -691,7 +691,8 @@ def collect_scoped_logs(
             except ValueError:
                 raw = {}
             message = " ".join(str(raw[k]) for k in ("level", "message", "exception", "error") if isinstance(raw.get(k), str))
-            content = json.dumps({**{k: v for k, v in trace.items() if k != "request"}, "message": redact(message), "request_fields": list(trace.get("request", {}))}, ensure_ascii=False)
+            content = json.dumps({**{k: v for k, v in trace.items() if k != "request"}, "message": redact(message),
+                                  "request_fields": trace.get("request_fields", list(trace.get("request", {})))}, ensure_ascii=False)
         else:
             content = redact(line)
         content = redact(content)

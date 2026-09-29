@@ -1,0 +1,65 @@
+{
+  "format": "tracebridge_project_recovery_validation_v1",
+  "recorded_at": "2026-09-29T09:13:53.303306+00:00",
+  "tests": {
+    "passed": 689,
+    "elapsed_seconds": 240.36,
+    "real_postgres_passed": 32,
+    "recovery_cases": 37
+  },
+  "evidence_scope": "PUBLIC_SYNTHETIC_PROJECT_REAL_FILE_APPLICATION_AND_LOCAL_HTTP",
+  "proposal_mode": "EXPLICIT_TEST_DOUBLE",
+  "nvidia_live_calls": 0,
+  "covered_states": [
+    "APPLIED",
+    "PASSED_RESOLVED",
+    "FAILED_REOPENED",
+    "INCONCLUSIVE_OPEN"
+  ],
+  "final_review": {
+    "fixed": "SQLITE_RECOVERY_AUDIT_LOSS_AFTER_CONTROL_COMMIT_INTERRUPTION",
+    "sqlite_and_postgres_retry_verified": true,
+    "checks_not_reexecuted_on_retry": true,
+    "duplicate_run_and_audit_prevented": true
+  },
+  "runtime": {
+    "status": "PASSED",
+    "preserved_job_count": 4,
+    "incident_records_preserved": true,
+    "profile_policy_credentials_preserved": true,
+    "web_http_status": 200,
+    "api_http_status": 200,
+    "runner_online": true,
+    "new_api_routes_loaded": true,
+    "daily_allow_apply": false,
+    "daily_recovery_policy_registered": false,
+    "daily_service_health": {
+      "backend": "UNREACHABLE",
+      "frontend": "UNREACHABLE"
+    },
+    "storage": "EXISTING_SQLITE"
+  },
+  "source_sha256": {
+    "tracebridge/recovery_contract.py": "a76278fd096b9f9f4b41236e087e50b73ee67e472713179869bd4c5b9eb59f71",
+    "tracebridge/project_lifecycle.py": "ca24ab67b57d2983bfbf4bb0598b45ffd6ca090b9532a23099718321be314b0a",
+    "tracebridge/project_recovery.py": "54d7bade3f204e9c9850759a4cb4e29feb6c7bab8b9c885b299d01da23b85617",
+    "tracebridge/control_plane.py": "bde2bb730110c03d4301ce63c243d416f6093bc13bddd49c7107e29f2a3250de",
+    "tracebridge/local_runner.py": "b343131b03ffc2a362a7b308b31158935d003f818ad46a70bb0df27c8cc3c4c4",
+    "tracebridge/project_repair.py": "ce8628b30ec345756571a52e1456d17cac36bd228b160a8e85ebb8b52ca23ace",
+    "tracebridge/incident_memory.py": "a3003d7d4064ee41234c3919c019afd42401a044ace6f9582e27c5fcf4bb40d2",
+    "tracebridge/work_management_ui.py": "aebbeb1cff089510937ed594806cbaeeb8c034f22ad5ebe850be8935418d37d9",
+    "scripts/project_tools.py": "54ec931a9ddc8bae0f533c3b3c62495bb07a7f56d48ca6fb8e7a5bc467fc39e8",
+    "pages/2_Report_Agent.py": "47d7f5e2f99d6e91622a7a3ab928ec0d76446c70da2f823a677bad2f4f4596e2",
+    "pages/3_Remote_Projects.py": "7a97d27bc0a2409e1cda9c3ee59ecf8c52a0a44e017b60a47cc3b5840f8ae03a",
+    "tests/test_project_recovery.py": "c55b4a8aa385a9f1667d7ff48927416f4ac8e2fd622f33d5be2c8b5d469730e7",
+    "tests/test_postgres_storage.py": "6d495ab236cec99a05dd53cf2950741c228b81d378de0455842e68098db0666e",
+    "docs/guides/project-recovery.md": "283fbb28487527c8f6581be817c5f058e162477802ec8f3a6878cfefab216c93",
+    "docs/validation/project-recovery.md": "9a37951896a1257a794a72e38fe6daf6b586b39b23d4543644aae5eb2fb0546c"
+  },
+  "not_verified": [
+    "DAILY_REAL_INCIDENT_RECOVERY",
+    "BROWSER_CLICK_JOURNEY",
+    "PRODUCTION_DEPLOYMENT_ROLLBACK",
+    "CONTINUOUS_MONITORING"
+  ]
+}
