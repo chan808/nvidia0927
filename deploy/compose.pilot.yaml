@@ -1,0 +1,63 @@
+# Dedicated 2 GiB EC2 pilot. Validate limits before increasing intake.
+services:
+  web:
+    mem_limit: 512m
+    cpus: 0.5
+    networks:
+      default:
+        ipv4_address: 172.28.70.3
+  control:
+    mem_limit: 640m
+    cpus: 0.75
+    environment:
+      FORWARDED_ALLOW_IPS: 172.28.70.6
+    networks:
+      default:
+        ipv4_address: 172.28.70.4
+  postgres:
+    mem_limit: 256m
+    cpus: 0.5
+    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "work_mem=2MB", "-c", "max_connections=30"]
+    networks:
+      default:
+        ipv4_address: 172.28.70.5
+  guard:
+    image: nginx:stable-alpine@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94
+    entrypoint: ["nginx", "-g", "daemon off;"]
+    user: "101:101"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=16777216,uid=101,gid=101,mode=0700
+    volumes:
+      - ./nginx.pilot.conf:/etc/nginx/nginx.conf:ro
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 32m
+    cpus: 0.25
+    pids_limit: 64
+    depends_on:
+      control:
+        condition: service_healthy
+    networks:
+      default:
+        ipv4_address: 172.28.70.6
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+  proxy:
+    mem_limit: 96m
+    cpus: 0.25
+    volumes:
+      - ./Caddyfile.pilot:/etc/caddy/Caddyfile:ro
+    depends_on:
+      guard:
+        condition: service_started
+    networks:
+      default:
+        ipv4_address: 172.28.70.2
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.28.70.0/24

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -57,7 +58,7 @@ def list_profiles(directory: Path | None = None) -> tuple[list[ProjectProfile], 
     return profiles, errors
 
 
-def save_profile(data: dict, directory: Path | None = None) -> Path:
+def save_profile(data: dict, directory: Path | None = None, *, expected_sha256: str | None = None) -> Path:
     """Validate before replacing a registration; no target files are changed."""
     project_id = data.get("project_id")
     if not isinstance(project_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", project_id):
@@ -67,6 +68,11 @@ def save_profile(data: dict, directory: Path | None = None) -> Path:
     destination = directory / (project_id + ".json")
     if destination.is_symlink():
         raise ValueError("프로젝트 설정의 링크 파일을 교체할 수 없습니다")
+    def unchanged():
+        if expected_sha256 is not None and (not destination.is_file()
+                or hashlib.sha256(destination.read_bytes()).hexdigest() != expected_sha256):
+            raise ValueError("프로젝트 연결 설정이 변경됐습니다. 다시 불러온 뒤 저장해 주세요")
+    unchanged()
     raw = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
     if len(raw) > 64_000:
         raise ValueError("프로젝트 설정은 64 KB 이하여야 합니다")
@@ -75,6 +81,7 @@ def save_profile(data: dict, directory: Path | None = None) -> Path:
         with temporary.open("xb") as stream:
             stream.write(raw)
         load_project_profile(temporary)
+        unchanged()
         temporary.replace(destination)
     finally:
         temporary.unlink(missing_ok=True)

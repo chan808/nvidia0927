@@ -9,6 +9,8 @@ from tracebridge.local_runner import ControlClient, GatewayError
 from tracebridge.work_management_ui import assessment_inputs, render_work_details, render_work_queue
 import hashlib
 import json
+from tracebridge.project_connection_ui import render_connection
+from tracebridge.project_registration_ui import render_registration
 
 
 st.set_page_config(page_title="연결된 프로젝트", page_icon="🔗", layout="wide")
@@ -23,6 +25,7 @@ if not token and os.getenv("TRACEBRIDGE_OPERATOR_TOKEN_FILE"):
         st.error("서버의 연결 인증 파일을 읽을 수 없습니다. 파일 경로와 접근 권한을 확인해 주세요.")
         st.stop()
 if not url or not token:
+    render_registration(st, sidebar=False, namespace="connected:new")
     st.info("서버의 프로젝트 연결 API를 설정하면 PC 실행기를 페어링할 수 있습니다. 로컬 사용은 제보 에이전트 페이지에서 시작하세요.")
     st.stop()
 api = ControlClient(url, token, allow_private_http=True)
@@ -49,17 +52,22 @@ except (GatewayError, OSError, httpx.HTTPError) as exc:
     st.error(str(exc))
     st.stop()
 if not projects:
+    render_registration(st, sidebar=False, namespace="connected:new")
     st.info("PC를 페어링하고 실제 경로를 등록한 다음 로컬 실행기를 시작해 주세요.")
     st.stop()
 selected = st.selectbox("프로젝트", [item["project_id"] for item in projects], key="remote_project")
 project = next(item for item in projects if item["project_id"] == selected)
+from tracebridge.public_admin_ui import render_public_settings
+connection_panel = st.container()
+render_public_settings(api, project)
 render_work_queue(api, selected)
-service = st.selectbox("조사 대상 서비스", project["service_ids"], key="remote_service")
+with connection_panel:
+    service = st.selectbox("조사 대상 서비스", project["service_ids"], key="remote_service")
+    local_profile = render_connection(st, project, service)
+if local_profile:
+    from tracebridge.project_repair_ui import render_repair_registration
+    render_repair_registration(st, local_profile)
 policy_id = st.selectbox("수정·검사 정책", project["repair_policy_ids"], key="remote_policy") if project.get("repair_policy_ids") else None
-st.write("PC:", "온라인" if project["online"] else "오프라인 · 제보는 대기합니다", "· 자료 연결:", project["status"])
-service_health = project.get("service_health", {}).get(service, "NOT_REGISTERED") if project["online"] else "UNKNOWN"
-st.write("마지막 서비스 응답:", service_health, "· 확인 시각:", project.get("health_checked_at") or "미확인")
-st.caption("서비스 응답은 PC가 마지막으로 확인한 상태입니다. 코드 연결·후보 검사·제보 해결 상태와 구분합니다.")
 report = st.text_area("증상·기대한 동작·대략적인 시각", max_chars=4000, key="remote_report_text")
 use_nvidia = st.checkbox("제보와 선별된 코드·로그를 서버의 NVIDIA 분석에 전송", key="remote_nvidia")
 with st.expander("이번 제보의 작업 평가"):

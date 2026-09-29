@@ -20,6 +20,9 @@ from test_project_recovery import live_api, recovery_commit_retry_scenario, test
 from test_semantic_memory import EmbeddingsDouble, saved
 from tracebridge.storage.rag_jobs import enqueue_index, recover_index, run_index_once
 from tracebridge.storage.transfer import compare_records, export_sqlite, import_sqlite, postgres_records, read_sqlite
+from test_public_service import automatic_recovery_scenario, enable as enable_public, send as send_public, status as public_status
+from test_public_service import long_history_retry_scenario, failed_followup_after_recovery_scenario, revoked_model_permission_scenario
+from test_public_service import application_interruption_scenario, epoch_fencing_scenario
 
 
 @pytest.fixture
@@ -52,6 +55,21 @@ def pg_store(pg_url):
 
 
 @pytest.fixture
+def pg_transfer_url():
+    # Reuse the same guarded, generated-database lifecycle for a separate target.
+    yield from pg_url.__wrapped__()
+
+
+@pytest.fixture
+def pg_transfer_store(pg_transfer_url):
+    store = open_control_store(pg_transfer_url)
+    try:
+        yield store
+    finally:
+        store.close()
+
+
+@pytest.fixture
 def pg_remote(pg_url, project, tmp_path):
     profile, *_ = project
     model = ModelDouble()
@@ -66,6 +84,46 @@ def pg_remote(pg_url, project, tmp_path):
         runner.publish_profiles()
         yield owner, api, runner, http, model, pg_url, profile
     app.state.storage.close()
+
+
+def test_real_postgres_public_automatic_recovery_and_knowledge(pg_remote, project, live_api):
+    automatic_recovery_scenario(pg_remote, project, live_api)
+
+
+def test_real_postgres_public_long_history_retry(pg_remote):
+    long_history_retry_scenario(pg_remote)
+
+
+def test_real_postgres_public_failed_followup_after_recovery(pg_remote, project, live_api, monkeypatch):
+    failed_followup_after_recovery_scenario(pg_remote, project, live_api, monkeypatch)
+
+
+def test_real_postgres_public_revoked_external_permission(pg_remote, monkeypatch):
+    revoked_model_permission_scenario(pg_remote, monkeypatch)
+
+
+@pytest.mark.parametrize("stage", ["before", "after"])
+def test_real_postgres_public_interrupted_application(pg_remote, project, live_api, monkeypatch, stage):
+    application_interruption_scenario(pg_remote, project, live_api, monkeypatch, stage)
+
+
+@pytest.mark.parametrize("endpoint", ["public-execution", "automatic-application"])
+def test_real_postgres_public_execution_epoch_fence(pg_remote, project, live_api, endpoint):
+    epoch_fencing_scenario(pg_remote, project, live_api, endpoint)
+
+
+def test_real_postgres_public_receipt_export_and_import(pg_remote, pg_transfer_store, tmp_path):
+    enable_public(pg_remote)
+    receipt = send_public(pg_remote).json()
+    pg_remote[2].run_once()
+    expected = public_status(pg_remote, receipt).json()
+    source = pg_remote[3].app.state.storage
+    exported = export_sqlite(source, tmp_path / "public-export", source_frozen=True)
+    control, incidents = tmp_path / "public-export/state.sqlite3", tmp_path / "public-export/server-incidents.sqlite3"
+    records = read_sqlite(control, incidents)
+    assert len(records["public_reports"]) == 1 and records["service_policies"]
+    imported = import_sqlite(pg_transfer_store, control, incidents, source_frozen=True)
+    assert imported["verification"]["status"] == "MATCH"
 
 
 def test_real_postgres_investigation_candidate_and_audit(pg_remote):

@@ -1,73 +1,22 @@
 name: Deployment image check (manual)
-
-on:
+"on":
   workflow_dispatch:
     inputs:
       export_image:
-        description: Export the checked image for manual transfer (uses artifact storage).
+        description: Export the checked image for manual transfer.
         type: boolean
         default: false
-
+      deploy:
+        description: Deploy to the dedicated TraceBridge AWS pilot after verification.
+        type: boolean
+        default: false
 permissions:
   contents: read
-
+  actions: read
+  id-token: write
 jobs:
-  linux-image:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    env:
-      IMAGE: tracebridge:${{ github.sha }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - name: Build the existing app on Linux amd64
-        run: |
-          docker build --platform linux/amd64 -f deploy/Dockerfile \
-            --build-arg "TRACEBRIDGE_REVISION=$GITHUB_SHA" -t "$IMAGE" .
-      - name: Check dependencies without network
-        run: docker run --rm --network none "$IMAGE" python -m pip check
-      - name: Check seed and persistent SQLite reopen without network
-        run: |
-          docker run --rm --network none --read-only --memory=1g --cpus=1 \
-            --tmpfs /tmp:size=134217728,mode=1777 \
-            --tmpfs /app/output:size=134217728,uid=10001,gid=10001,mode=0700 \
-            --tmpfs /app/generated:size=67108864,uid=10001,gid=10001,mode=0700 \
-            "$IMAGE" python deploy/offline_smoke.py
-      - name: Check process health without publishing ports
-        run: |
-          docker run -d --name tracebridge-health --network none --read-only --memory=1g --cpus=1 \
-            --tmpfs /tmp:size=134217728,mode=1777 \
-            --tmpfs /app/output:size=134217728,uid=10001,gid=10001,mode=0700 \
-            --tmpfs /app/generated:size=67108864,uid=10001,gid=10001,mode=0700 \
-            -e STREAMLIT_SERVER_FILE_WATCHER_TYPE=none "$IMAGE"
-          for attempt in $(seq 1 30); do
-            if docker exec tracebridge-health python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3).read()"; then
-              exit 0
-            fi
-            sleep 2
-          done
-          docker logs --tail=80 tracebridge-health
-          exit 1
-      - name: Record the built image and dependencies
-        run: |
-          mkdir -p output/deployment-build
-          docker image inspect --format '{{.Id}}' "$IMAGE" > output/deployment-build/image-id.txt
-          printf '%s\n' "$GITHUB_SHA" > output/deployment-build/source-commit.txt
-          docker run --rm --network none "$IMAGE" python -m pip freeze --all > output/deployment-build/linux-python-freeze.txt
-      - name: Optionally export the checked image
-        if: ${{ inputs.export_image }}
-        run: |
-          docker save "$IMAGE" | gzip > output/deployment-build/tracebridge-image.tar.gz
-          cd output/deployment-build
-          sha256sum tracebridge-image.tar.gz > tracebridge-image.tar.gz.sha256
-      - uses: actions/upload-artifact@v7
-        with:
-          name: deployment-build-${{ github.sha }}
-          path: output/deployment-build/
-          retention-days: 1
-          compression-level: 0
-          if-no-files-found: error
-      - name: Stop the runner-only health container
-        if: always()
-        run: docker rm -f tracebridge-health || true
+  pilot:
+    uses: ./.github/workflows/aws-pilot.yml
+    with:
+      deploy: ${{ inputs.deploy }}
+      export_image: ${{ inputs.export_image }}

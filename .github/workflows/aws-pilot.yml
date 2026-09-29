@@ -1,0 +1,134 @@
+name: AWS pilot release
+on:
+  workflow_call:
+    inputs:
+      deploy:
+        type: boolean
+        default: false
+      export_image:
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Publish the checked image and deploy the dedicated TraceBridge pilot.
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+concurrency:
+  group: tracebridge-aws-pilot
+  cancel-in-progress: false
+jobs:
+  checked-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      IMAGE: tracebridge:verify-${{ github.sha }}
+      AWS_REGION: ap-northeast-2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the release on Linux
+        run: docker build --platform linux/amd64 --build-arg "TRACEBRIDGE_REVISION=$GITHUB_SHA" -f deploy/Dockerfile -t "$IMAGE" .
+      - name: Check dependencies and offline seed
+        run: |
+          docker run --rm --network none "$IMAGE" python -m pip check
+          docker run --rm --network none --read-only --memory=1g \
+            --tmpfs /tmp:mode=1777 --tmpfs /app/output:uid=10001,gid=10001,mode=0700 \
+            --tmpfs /app/generated:uid=10001,gid=10001,mode=0700 "$IMAGE" python deploy/offline_smoke.py
+      - name: Check full Compose, PostgreSQL, local TLS and restart persistence
+        run: sudo python3 scripts/check_deployment.py --image "$IMAGE" --revision "$GITHUB_SHA"
+      - name: Record deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: pilot-check-${{ github.sha }}
+          path: output/deployment-check.json
+          retention-days: 7
+          if-no-files-found: warn
+      - name: Require successful source regression for this commit
+        if: ${{ inputs.deploy }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for attempt in $(seq 1 80); do
+            conclusion=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/regression.yml/runs" \
+              -f head_sha="$GITHUB_SHA" -f per_page=10 \
+              --jq '.workflow_runs | map(select(.event == "push")) | sort_by(.created_at) | last | .conclusion // "pending"')
+            case "$conclusion" in
+              success) exit 0 ;;
+              failure|cancelled|timed_out|action_required) echo "Regression did not pass: $conclusion"; exit 1 ;;
+              *) sleep 10 ;;
+            esac
+          done
+          echo "Regression did not finish"; exit 1
+      - name: Obtain scoped temporary AWS credentials
+        if: ${{ inputs.deploy && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/aws-free-tier-deploy') }}
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.TRACEBRIDGE_AWS_ROLE_ARN }}
+          aws-region: ap-northeast-2
+          allowed-account-ids: ${{ vars.TRACEBRIDGE_AWS_ACCOUNT_ID }}
+          role-session-name: tracebridge-${{ github.run_id }}
+      - name: Check the active Free plan and credit reserve
+        if: ${{ inputs.deploy }}
+        run: |
+          aws freetier get-account-plan-state --region us-east-1 > "$RUNNER_TEMP/free-plan.json"
+          python3 - "$RUNNER_TEMP/free-plan.json" <<'PY'
+          import datetime,json,sys
+          d=json.load(open(sys.argv[1]))
+          assert d["accountPlanType"]=="FREE" and d["accountPlanStatus"]=="ACTIVE"
+          assert d["accountPlanRemainingCredits"]["unit"]=="USD" and float(d["accountPlanRemainingCredits"]["amount"]) >= 5
+          assert datetime.datetime.fromisoformat(d["accountPlanExpirationDate"].replace("Z","+00:00")) > datetime.datetime.now(datetime.timezone.utc)
+          print("Active Free plan and reserve confirmed")
+          PY
+      - name: Login to the dedicated ECR registry
+        if: ${{ inputs.deploy }}
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+      - name: Publish an immutable release image
+        if: ${{ inputs.deploy }}
+        env:
+          ECR_URI: ${{ vars.TRACEBRIDGE_ECR_URI }}
+        run: |
+          existing=$(aws ecr describe-images --repository-name tracebridge-pilot \
+            --image-ids imageTag="$GITHUB_SHA" --query 'imageDetails[0].imageDigest' --output text 2>/dev/null || true)
+          if [ -z "$existing" ] || [ "$existing" = None ]; then
+            docker tag "$IMAGE" "$ECR_URI:$GITHUB_SHA"
+            docker push "$ECR_URI:$GITHUB_SHA"
+          fi
+          digest=$(aws ecr describe-images --repository-name tracebridge-pilot \
+            --image-ids imageTag="$GITHUB_SHA" --query 'imageDetails[0].imageDigest' --output text)
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "RELEASE_DIGEST=$digest" >> "$GITHUB_ENV"
+      - name: Deploy the checked digest through the scoped SSM document
+        if: ${{ inputs.deploy }}
+        env:
+          INSTANCE_ID: ${{ vars.TRACEBRIDGE_INSTANCE_ID }}
+          DEPLOY_DOCUMENT: ${{ vars.TRACEBRIDGE_DEPLOY_DOCUMENT }}
+        run: |
+          python3 - "$GITHUB_SHA" "$RELEASE_DIGEST" "$RUNNER_TEMP/ssm-parameters.json" <<'PY'
+          import json,sys
+          json.dump({"Revision":[sys.argv[1]],"Digest":[sys.argv[2]]},open(sys.argv[3],"w"))
+          PY
+          command_id=$(aws ssm send-command --instance-ids "$INSTANCE_ID" --document-name "$DEPLOY_DOCUMENT" \
+            --parameters "file://$RUNNER_TEMP/ssm-parameters.json" --query 'Command.CommandId' --output text)
+          for attempt in $(seq 1 100); do
+            status=$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$INSTANCE_ID" \
+              --query Status --output text 2>/dev/null || echo Pending)
+            case "$status" in
+              Success)
+                aws ssm get-command-invocation --command-id "$command_id" --instance-id "$INSTANCE_ID" \
+                  --query StandardOutputContent --output text
+                exit 0 ;;
+              Failed|TimedOut|Cancelled|Cancelling)
+                aws ssm get-command-invocation --command-id "$command_id" --instance-id "$INSTANCE_ID" \
+                  --query '{status:StatusDetails,stdout:StandardOutputContent,stderr:StandardErrorContent}' --output json
+                exit 1 ;;
+              *) sleep 10 ;;
+            esac
+          done
+          echo "SSM deployment timed out"; exit 1

@@ -32,7 +32,7 @@ COPY app.py nat_workflow.yml ./
 COPY .streamlit/config.toml ./.streamlit/config.toml
 COPY pages/ ./pages/
 COPY scripts/ ./scripts/
-COPY deploy/offline_smoke.py ./deploy/offline_smoke.py
+COPY deploy/ ./deploy/
 COPY examples/ ./examples/
 COPY skills/tracebridge-triage/ ./skills/tracebridge-triage/
 COPY tests/fixtures/agolive_repo/ ./tests/fixtures/agolive_repo/

@@ -25,6 +25,13 @@
 !deploy/
 !deploy/Dockerfile
 !deploy/offline_smoke.py
+!deploy/service_smoke.py
+!deploy/*.yaml
+!deploy/Caddyfile*
+!deploy/nginx.pilot.conf
+!deploy/aws/
+!deploy/aws/*.sh
+!deploy/aws/prepare_runtime.py
 **/__pycache__
 **/__pycache__/**
 **/*.pyc

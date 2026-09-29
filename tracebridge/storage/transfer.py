@@ -15,7 +15,8 @@ from sqlalchemy import delete, func, insert, select
 
 from . import schema as s
 
-CONTROL_TABLES = ("pairings", "runners", "bindings", "jobs", "model_steps", "query_embeddings", "job_events", "index_jobs", "storage_settings")
+CONTROL_TABLES = ("pairings", "runners", "bindings", "jobs", "model_steps", "query_embeddings", "job_events", "index_jobs", "storage_settings",
+                  "service_policies", "public_reports", "public_limits")
 INCIDENT_TABLES = ("incidents", "runs", "cards", "change_jobs", "card_search", "project_applications", "card_embeddings")
 TABLE_NAMES = CONTROL_TABLES + INCIDENT_TABLES
 ACTIVE_WORK = {"RUNNING", "CANCEL_REQUESTED", "RECOVERY_REQUIRED"}

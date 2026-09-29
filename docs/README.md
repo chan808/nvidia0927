@@ -1,12 +1,14 @@
 # TraceBridge 문서 안내
 
-현재 기능은 [구현 상태](current-state.md), 최신 적용 보고·회복 검사·전체 회귀는 [서비스 확인 검증](validation/project-recovery.md), 이전 650개 회귀와 개발 HTTP 연결은 [daily 요청 관측 검증](validation/daily-observation.md), 저장·검색 통합은 [PostgreSQL·RAG 재검토](validation/postgres-rag-review.md)에서 확인하세요. 사용법, 제품 목표, 과거 기록을 아래처럼 나눴습니다.
+현재 기능은 [구현 상태](current-state.md), 최신 공개 접수·자동 처리·회귀는 [기본 서비스 검증](validation/basic-service.md), 이전 적용 보고·회복 검사는 [서비스 확인 검증](validation/project-recovery.md), 개발 HTTP 연결은 [daily 요청 관측 검증](validation/daily-observation.md)에서 확인하세요.
 
 ## 사용법
 
 | 문서 | 내용 |
 | --- | --- |
 | [시작하기](guides/getting-started.md) | 지원 환경, 설치, 설정, 첫 화면 |
+| [공개 제보와 자동 처리](guides/basic-service.md) | 공개 화면·접수 토큰·후속 답변, 자동 평가·후보 준비·비운영 적용·회복·지식 승인 |
+| [공개 운영 점검표](guides/basic-service-rollout.md) | 대회 시연, 인터넷 공개 전 검증 조건, 권한 철회·실패·중단 대응, 후속 기능 순서 |
 | [사용법](guides/usage.md) | 제보·사진·후속 답변·프로젝트 연결·기억·수정안·기존 데모 |
 | [실제 프로젝트 운영](guides/real-projects.md) | 실제 다중 경로·서비스 등록, 일반 수정·검사·검토 적용, PC 페어링·배포 웹 |
 | [daily 실제 요청 연결](guides/daily-observation.md) | 요청 ID·시각·JSONL·빌드·서비스 응답 연결과 실제 HTTP 재현 |
@@ -28,6 +30,7 @@
 | 문서 | 내용 |
 | --- | --- |
 | [제품](design/product.md) | 사용자, 가치, 제품 범위 |
+| [기본 서비스 구현](design/basic-service.md) | 공개 접수·현재 관측·작업 판단·자동 처리·검증된 지식의 계약과 후속 확장 |
 | [사건 흐름](design/workflows.md) | 상태, 분류, 담당 역할, 보고 |
 | [시스템 구조](design/architecture.md) | 구성 요소와 도구·실행 계약 |
 | [PostgreSQL·RAG 통합 개선안](design/postgres-rag-evolution.md) | 중앙 DB/PC 저널, 지식·검색·버전·예산, 단계별 이전/복구, 실제 사건 평가와 지속 개선 |
@@ -38,6 +41,8 @@
 | [로드맵](design/roadmap.md) | 기능 의존성과 후속 확장 |
 
 ## 검증 기록
+
+- [기본 서비스 검증](validation/basic-service.md): 공개 브라우저 접수·질문·후속 답변·후보 준비, 실제 파일 적용/HTTP 회복·지식 승인·PostgreSQL·내부 정보 경계
 
 - [게시 전 문서·파일 점검](validation/publication-review.md): 미사용 설정·추적된 로컬 산출물 정리, 문서 링크·credential·검증 소스 해시·wheel 포함 파일 확인
 - [서비스 확인 검증](validation/project-recovery.md): 공개 프로젝트의 실제 원본 적용·API 관측·중앙 SQLite/PostgreSQL 보고·회복 실패 재개·AppTest

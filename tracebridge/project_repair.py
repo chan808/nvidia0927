@@ -62,6 +62,7 @@ class ProjectRepairPolicy(BaseModel):
     execution_mode: str = "TRUSTED_LOCAL"
     trust_project_code: bool = False
     allow_apply: bool = False
+    auto_apply_nonprod: bool = False
     allow_reproduction_without_logs: bool = False
     editable_paths: list[str] = Field(min_length=1, max_length=32)
     checks: list[CheckSpec] = Field(min_length=1, max_length=8)
@@ -166,6 +167,8 @@ def _validate_policy(data: dict) -> ProjectRepairPolicy:
         raise PolicyDenied("로컬 검사는 소유자가 신뢰하는 프로젝트 코드만 실행합니다")
     if policy.execution_mode == "DOCKER" and not policy.docker_image:
         raise PolicyDenied("Docker 검사에 사용할 로컬 이미지가 필요합니다")
+    if policy.auto_apply_nonprod and (not policy.enabled or not policy.allow_apply or policy.recovery is None):
+        raise PolicyDenied("비운영 자동 적용에는 활성화된 적용 권한과 회복 검사가 필요합니다")
     ids = [check.id for check in policy.checks]
     if len(set(ids)) != len(ids) or policy.reproduction_check_id not in ids or policy.regression_check_id not in ids:
         raise PolicyDenied("재현·회귀 검사 ID는 고유한 등록 검사를 가리켜야 합니다")

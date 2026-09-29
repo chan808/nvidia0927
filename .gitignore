@@ -7,6 +7,8 @@ pytest-cache-files-*/
 generated/
 *.pyc
 *.egg-info/
+/build/
+/dist/
 submission/
 output/
 .codex-remote-attachments/

@@ -1,0 +1,345 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Independent TraceBridge Free-plan EC2 pilot with scoped GitHub OIDC,
+  immutable ECR and SSM
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+  UbuntuAmi:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+  InstanceType:
+    Type: String
+    Default: t3.small
+    AllowedValues:
+    - t3.small
+  GithubOidcProviderArn:
+    Type: String
+    AllowedPattern: ^arn:aws:iam::[0-9]{12}:oidc-provider/token.actions.githubusercontent.com$
+  GithubRepository:
+    Type: String
+    Default: chan808/nvidia0927
+    AllowedValues:
+    - chan808/nvidia0927
+  DeploymentBranch:
+    Type: String
+    Default: codex/aws-free-tier-deploy
+    AllowedValues:
+    - codex/aws-free-tier-deploy
+Resources:
+  Repository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: tracebridge-pilot
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: '{"rules":[{"rulePriority":1,"description":"Keep three
+          checked release images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":3},"action":{"type":"expire"}}]}'
+      Tags:
+      - Key: Project
+        Value: tracebridge
+      - Key: ManagedBy
+        Value: CloudFormation
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-ec2
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: ec2.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+      - PolicyName: tracebridge-runtime
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - ecr:GetAuthorizationToken
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - ecr:BatchGetImage
+            - ecr:GetDownloadUrlForLayer
+            - ecr:BatchCheckLayerAvailability
+            Resource:
+              Fn::GetAtt:
+              - Repository
+              - Arn
+          - Effect: Allow
+            Action:
+            - ssm:GetParameter
+            Resource:
+              Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/tracebridge/pilot/*
+      Tags:
+      - Key: Project
+        Value: tracebridge
+      - Key: ManagedBy
+        Value: CloudFormation
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+      - Ref: InstanceRole
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: TraceBridge HTTPS and ACME; administration via SSM
+      VpcId:
+        Ref: VpcId
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 0.0.0.0/0
+      Tags:
+      - Key: Project
+        Value: tracebridge
+      - Key: ManagedBy
+        Value: CloudFormation
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType:
+        Ref: InstanceType
+      ImageId:
+        Ref: UbuntuAmi
+      IamInstanceProfile:
+        Ref: InstanceProfile
+      CreditSpecification:
+        CPUCredits: standard
+      MetadataOptions:
+        HttpTokens: required
+        HttpEndpoint: enabled
+      NetworkInterfaces:
+      - DeviceIndex: '0'
+        AssociatePublicIpAddress: true
+        SubnetId:
+          Ref: SubnetId
+        GroupSet:
+        - Ref: SecurityGroup
+      BlockDeviceMappings:
+      - DeviceName: /dev/sda1
+        Ebs:
+          VolumeType: gp3
+          VolumeSize: 30
+          Encrypted: true
+          DeleteOnTermination: false
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/usr/bin/env bash
+            set -euo pipefail
+            exec >> /var/log/tracebridge-bootstrap.log 2>&1
+            mkdir -p /opt/tracebridge
+            cat > /opt/tracebridge/aws-runtime <<'RUNTIME'
+            export AWS_REGION=${AWS::Region}
+            export ECR_URI=${Repository.RepositoryUri}
+            export ECR_REGISTRY=${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+            RUNTIME
+            chmod 600 /opt/tracebridge/aws-runtime
+            #!/usr/bin/env bash
+            set -euo pipefail
+            umask 077
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -o Acquire::Retries=6
+            apt-get install -y ca-certificates curl gnupg unzip python3
+            install -m 0755 -d /etc/apt/keyrings
+            curl --retry 6 -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+            chmod a+r /etc/apt/keyrings/docker.asc
+            cat > /etc/apt/sources.list.d/docker.sources <<'DOCKER'
+            Types: deb
+            URIs: https://download.docker.com/linux/ubuntu
+            Suites: noble
+            Components: stable
+            Architectures: amd64
+            Signed-By: /etc/apt/keyrings/docker.asc
+            DOCKER
+            apt-get update -o Acquire::Retries=6
+            apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+            systemctl enable --now docker
+            curl --retry 6 -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/tracebridge-awscli.zip
+            unzip -q /tmp/tracebridge-awscli.zip -d /tmp/tracebridge-awscli
+            /tmp/tracebridge-awscli/aws/install
+            install -d -m 0700 /opt/tracebridge/releases /srv/tracebridge/private /srv/tracebridge/backups
+            install -d -m 0700 -o 10001 -g 10001 /srv/tracebridge/data
+            cat > /opt/tracebridge/bootstrap-release.sh <<'RELEASE'
+            #!/usr/bin/env bash
+            set -euo pipefail
+            umask 077
+            exec 9>/var/lock/tracebridge-deploy.lock
+            flock -n 9 || { echo 'A deployment is already running'; exit 1; }
+            test "$#" -eq 2 || exit 2
+            revision="$1"
+            digest="$2"
+            [[ "$revision" =~ ^[a-f0-9]{40}$ && "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || exit 2
+            source /opt/tracebridge/aws-runtime
+            image="$ECR_URI@$digest"
+            aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY" >/dev/null
+            docker pull "$image"
+            label=$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')
+            test "$label" = "$revision" || { echo 'Image revision mismatch'; exit 1; }
+            directory="/opt/tracebridge/releases/$revision"
+            mkdir -p "$directory"
+            extract_name="tracebridge-extract-$(printf '%s' "$revision" | cut -c1-12)"
+            docker create --name "$extract_name" "$image" >/dev/null
+            trap 'docker rm -f "$extract_name" >/dev/null 2>&1 || true' EXIT
+            docker cp "$extract_name:/app/deploy/." "$directory/deploy"
+            bash "$directory/deploy/aws/deploy_release.sh" "$revision" "$image"
+            RELEASE
+            chmod 700 /opt/tracebridge/bootstrap-release.sh
+            touch /opt/tracebridge/bootstrap-ready
+      Tags:
+      - Key: Project
+        Value: tracebridge
+      - Key: ManagedBy
+        Value: CloudFormation
+      - Key: Name
+        Value: tracebridge-pilot
+  PublicAddress:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+      - Key: Project
+        Value: tracebridge
+      - Key: ManagedBy
+        Value: CloudFormation
+  AddressAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      InstanceId:
+        Ref: Instance
+      AllocationId:
+        Fn::GetAtt:
+        - PublicAddress
+        - AllocationId
+  DeployDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-deploy
+      DocumentType: Command
+      DocumentFormat: JSON
+      UpdateMethod: NewVersion
+      Content:
+        schemaVersion: '2.2'
+        description: Deploy a checked TraceBridge ECR digest
+        parameters:
+          Revision:
+            type: String
+            allowedPattern: ^[a-f0-9]{40}$
+          Digest:
+            type: String
+            allowedPattern: ^sha256:[a-f0-9]{64}$
+        mainSteps:
+        - action: aws:runShellScript
+          name: deployCheckedImage
+          inputs:
+            timeoutSeconds: '900'
+            runCommand:
+            - for i in $(seq 1 120); do test -f /opt/tracebridge/bootstrap-ready &&
+              break; sleep 5; done
+            - test -f /opt/tracebridge/bootstrap-ready || exit 1
+            - exec /opt/tracebridge/bootstrap-release.sh '{{Revision}}' '{{Digest}}'
+      Tags:
+      - Key: Project
+        Value: tracebridge
+      - Key: ManagedBy
+        Value: CloudFormation
+  GithubRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-github
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Federated:
+              Ref: GithubOidcProviderArn
+          Action: sts:AssumeRoleWithWebIdentity
+          Condition:
+            StringEquals:
+              token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              token.actions.githubusercontent.com:sub:
+              - Fn::Sub: repo:${GithubRepository}:ref:refs/heads/main
+              - Fn::Sub: repo:${GithubRepository}:ref:refs/heads/${DeploymentBranch}
+      Policies:
+      - PolicyName: tracebridge-build-deploy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - ecr:GetAuthorizationToken
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - ecr:BatchCheckLayerAvailability
+            - ecr:GetDownloadUrlForLayer
+            - ecr:BatchGetImage
+            - ecr:PutImage
+            - ecr:InitiateLayerUpload
+            - ecr:UploadLayerPart
+            - ecr:CompleteLayerUpload
+            - ecr:DescribeImages
+            Resource:
+              Fn::GetAtt:
+              - Repository
+              - Arn
+          - Effect: Allow
+            Action:
+            - ssm:SendCommand
+            Resource:
+            - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:document/${DeployDocument}
+            - Fn::Sub: arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/${Instance}
+          - Effect: Allow
+            Action:
+            - ssm:GetCommandInvocation
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - freetier:GetAccountPlanState
+            Resource: '*'
+      Tags:
+      - Key: Project
+        Value: tracebridge
+      - Key: ManagedBy
+        Value: CloudFormation
+Outputs:
+  InstanceId:
+    Value:
+      Ref: Instance
+  PublicIp:
+    Value:
+      Ref: PublicAddress
+  EcrUri:
+    Value:
+      Fn::GetAtt:
+      - Repository
+      - RepositoryUri
+  GithubRoleArn:
+    Value:
+      Fn::GetAtt:
+      - GithubRole
+      - Arn
+  DeployDocument:
+    Value:
+      Ref: DeployDocument

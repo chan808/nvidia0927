@@ -464,6 +464,8 @@ def _enrich_card(card: dict, record: dict, job: dict | None = None, investigatio
             card["limitations"] = list(dict.fromkeys([*card["limitations"], *[_text(value) for value in job.get("limitations", [])]]))[:12]
     # These factual projections always come from source records, never editable card text.
     card["verification_results"] = _verification_results(record, job)
+    from .service_workflow import knowledge_quality
+    card["knowledge_quality"] = knowledge_quality(card)
     return card
 
 

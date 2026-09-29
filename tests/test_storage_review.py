@@ -212,7 +212,7 @@ def test_existing_revision_upgrade_is_atomic_and_preserves_records(pg_url):
                 assert store.get_run("agolive", run["run_id"])["summary"] == run["summary"]
                 assert store.get_card("agolive", run["run_id"])["review"]["status"] == "APPROVED"
             with upgraded.transaction() as tx:
-                assert tx.connection.exec_driver_sql("SELECT version_num FROM tracebridge.alembic_version").scalar_one() == "20260929_03"
+                assert tx.connection.exec_driver_sql("SELECT version_num FROM tracebridge.alembic_version").scalar_one() == "20260929_04"
         finally:
             upgraded.close()
     finally:
