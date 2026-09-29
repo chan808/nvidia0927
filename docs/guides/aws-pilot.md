@@ -1,5 +1,7 @@
 # 전용 AWS 파일럿 운영
 
+[첫 배포의 실제 확인과 남은 연결](../validation/aws-pilot.md)을 먼저 확인한다.
+
 2026-09-30. 기존 AWS 계정의 별도 EC2에 TraceBridge 웹·제어 API·PostgreSQL을 실행한다. 조사·수정 검사는 소유자 PC 실행기가 담당한다.
 
 ## 연결 정보

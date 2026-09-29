@@ -43,6 +43,8 @@
 
 ## 검증 기록
 
+- [AWS 전용 파일럿 첫 배포](validation/aws-pilot.md): 실제 EC2·OIDC·ECR·SSM 배포, 758개 Linux·PostgreSQL 회귀, 서버 화면·인증·메모리 확인과 DNS·키 연결 대기
+
 - [기본 서비스 검증](validation/basic-service.md): 공개 브라우저 접수·질문·후속 답변·후보 준비, 실제 파일 적용/HTTP 회복·지식 승인·PostgreSQL·내부 정보 경계
 
 - [게시 전 문서·파일 점검](validation/publication-review.md): 미사용 설정·추적된 로컬 산출물 정리, 문서 링크·credential·검증 소스 해시·wheel 포함 파일 확인
