@@ -35,6 +35,12 @@ services:
     security_opt: ["no-new-privileges:true"]
     mem_limit: 32m
     cpus: 0.25
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
     pids_limit: 64
     depends_on:
       control:
@@ -52,7 +58,7 @@ services:
       - ./Caddyfile.pilot:/etc/caddy/Caddyfile:ro
     depends_on:
       guard:
-        condition: service_started
+        condition: service_healthy
     networks:
       default:
         ipv4_address: 172.28.70.2

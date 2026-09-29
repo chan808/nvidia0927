@@ -102,6 +102,11 @@ def main():
         auth = base64.b64encode(("check:" + settings["password"]).encode()).decode()
         with urllib.request.urlopen(urllib.request.Request(url, headers={"Authorization": "Basic " + auth}), context=context, timeout=10) as response:
             assert response.status == 200
+        try:
+            urllib.request.urlopen(url + "/v1/projects", context=context, timeout=10)
+            raise RuntimeError("Owner API did not require authentication")
+        except urllib.error.HTTPError as error:
+            assert error.code == 401, "Public proxy path failed: " + str(error.code)
         # Even malformed API traffic must be bounded before Python handles it.
         def malformed(_):
             try:
@@ -128,6 +133,13 @@ def main():
         result["memory_at_completion"] = [json.loads(line) for line in stats.splitlines()]
         (ROOT / "output/deployment-check.json").write_text(json.dumps(result, indent=2))
         print(json.dumps({"deployment_check": "PASSED", "external_model_calls": 0}))
+    except Exception as error:
+        result["deployment_check"] = "FAILED"
+        result["error"] = str(error)
+        (ROOT / "output/deployment-check.json").write_text(json.dumps(result, indent=2))
+        # Synthetic CI stack only; never dump runtime environment or credentials.
+        dc("logs", "--no-color", "--tail", "60", "guard")
+        raise
     finally:
         dc("down", "--volumes", "--remove-orphans")
         assert folder.is_relative_to(ROOT / "output") and folder.name == project

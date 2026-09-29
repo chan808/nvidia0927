@@ -19,6 +19,7 @@
 | [Agolive 수동 조사](guides/agolive.md) | 기존 수동/GPT 페이지의 연결과 제한 |
 | [클라우드 웹과 로컬 실행기](guides/cloud-and-local.md) | 다중 경로 등록, 소유자 전용 원격 연결의 구현 범위와 후속 운영 조건 |
 | [배포 가이드](guides/deployment.md) | CPU 서버·Compose·HTTPS·영속 저장·백업, 비공개 웹과 로컬 연결의 완료 기준 |
+| [전용 AWS 파일럿](guides/aws-pilot.md) | 실제 전용 EC2·OIDC 배포·DNS·PC 페어링·운영비 |
 | [신규 AWS 계정](guides/new-aws.md) | 현재 배포 방향: 무료 자격·계정 분리, EC2 템플릿, 수동 Linux 이미지 검증 |
 | [무료 배포](guides/free-deployment.md) | AWS Free plan EC2, Lightsail 90일 체험, Oracle Always Free와 2 GB 설정 |
 | [기존 서버 재사용](guides/existing-server.md) | Agolive EC2·Nginx·SSM 확인 결과와 별도 Compose 공유 배포 절차 |
