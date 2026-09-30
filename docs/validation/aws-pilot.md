@@ -37,7 +37,7 @@ CloudFormation 리소스 9개 생성이 완료됐다. 이후 수정은 새 Githu
 ## 공인 연결과 남은 확인
 
 1. DNSZI 화면에서 tracebridge.ckswhd.shop A → 43.200.230.130을 확인했다. 네 권한 네임서버와 일반 DNS 질의가 같은 IP를 응답했다.
-2. 공인 HTTPS가 검증된 TLS 1.3 인증서를 제공한다. HTTP는 308로 HTTPS로 이동하고, 인증 없는 운영자 화면·/v1/projects는 401이다. 기존 apex·www는 각각 HTTPS 301·200으로 정상이다. 실제 브라우저의 화면 클릭 여정은 아직 확인하지 않았다.
+2. 공인 HTTPS가 검증된 TLS 1.3 인증서를 제공한다. HTTP는 308로 HTTPS로 이동하고, 인증 없는 운영자 화면·/v1/projects는 401이다. 기존 apex·www는 각각 HTTPS 301·200으로 정상이다. 자동 Edge 탭에서는 새 주소만 ERR_BLOCKED_BY_CLIENT로 차단됐으며 기존 www 주소는 열렸다. 실제 브라우저의 화면 클릭 여정은 소유자 확인을 기다린다. 브라우저 보안 설정은 변경하지 않았다.
 3. 소유자 승인 뒤 기존 NVIDIA_API_KEY를 같은 AWS 계정의 암호화 SSM /tracebridge/pilot/app-env에 등록하고 새 서버의 모델 연결을 확인한다. 현재 키는 비어 있고 임베딩 워커는 비활성이다.
 4. 새 서버용 PC 페어링·실제 프로젝트 처리·Docker 격리와 실제 서비스 회복을 확인한다. 이번 EC2 배포 검사에 실모델·실제 프로젝트 원본 적용을 포함하지 않았다.
 
