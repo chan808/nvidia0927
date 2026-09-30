@@ -29,6 +29,8 @@ git diff --check
 
 기본 검사에서는 PostgreSQL 전용 사례를 건너뛴다. [중앙 DB 가이드](postgres-rag.md)의 선택 의존성을 설치하고, 전용 테스트 DB를 생성·삭제할 수 있는 **격리된 PostgreSQL** URL을 `TRACEBRIDGE_TEST_DATABASE_URL` 환경 변수에 설정한 뒤 같은 pytest 명령을 실행해야 중앙 저장·검색·이전·적용 보고까지 검사한다. URL은 비공개 설정에서 읽고 명령 인수·Git·검사 로그에 넣지 않는다. 실제 조사 대상 서비스나 운영 DB를 테스트 서버로 지정하지 않는다.
 
+GitHub의 `Regression` 작업은 Ubuntu·Python 3.12와 격리된 PostgreSQL/pgvector에서 프로젝트의 버전 고정 직접 의존성을 설치해 검사한다. 저장소의 `requirements-*.lock`은 Windows amd64 / Python 3.12.7 재현용이다. Linux에서 설치된 선택적 간접 의존성 버전을 Windows 잠금 파일과 같다고 가정하지 않는다. 파일 보존 검사는 OS가 기록한 원래 바이트를 기준으로 비교한다.
+
 공개 처리 또는 회복 흐름만 확인하려면:
 
 ```powershell

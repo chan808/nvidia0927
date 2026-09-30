@@ -182,6 +182,7 @@ def test_application_preserves_newer_edits(project, changed):
     original = (root / "app.py").read_bytes()
     if changed == "original":
         (root / "app.py").write_text("OWNER_NEW_EDIT = 1\n")
+        newer_edit = (root / "app.py").read_bytes()
     elif changed == "candidate":
         (Path(job["candidate"]["root"]) / "app.py").write_text("UNVERIFIED_EDIT = 1\n")
     else:
@@ -189,7 +190,7 @@ def test_application_preserves_newer_edits(project, changed):
         save_repair_policy(policy, profile)
     with pytest.raises(PolicyDenied):
         apply_project_change(profile.project_id, job["work_id"], profile, expected_diff_sha256=job["diff"]["sha256"], db_path=db)
-    assert (root / "app.py").read_bytes() == (b"OWNER_NEW_EDIT = 1\r\n" if changed == "original" else original)
+    assert (root / "app.py").read_bytes() == (newer_edit if changed == "original" else original)
 
 
 @pytest.mark.parametrize("mutation", ["unknown-evidence", "wrong-hash", "edit-test", "escape", "no-change"])
