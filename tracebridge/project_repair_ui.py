@@ -9,10 +9,11 @@ from .project_repair import load_repair_policy, save_repair_policy, repair_block
 from .project_sources import redact
 
 
-def render_repair_registration(st, profile):
+def render_repair_registration(st, profile, *, sidebar=True):
     if os.getenv("TRACEBRIDGE_ALLOW_PROJECT_REGISTRATION") != "1":
         return
-    with st.sidebar.expander("프로젝트 수정·검사 설정"):
+    container = st.sidebar if sidebar else st
+    with container.expander("프로젝트 수정·검사 설정"):
         st.caption("허용한 저장소의 별도 사본에서만 수정 후보를 준비합니다. 로컬 검사는 신뢰하는 프로젝트 코드를 실행하며 파일·네트워크 격리를 제공하지 않습니다.")
         ids = ["primary", *[item.id for item in profile.repositories if item.code_roots]]
         with st.form("register_project_repair"):

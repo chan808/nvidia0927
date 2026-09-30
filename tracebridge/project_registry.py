@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from pathlib import Path
 import re
+import time
 from uuid import uuid4
 
 from .project_profile import ProjectProfile, load_project_profile
@@ -35,6 +37,8 @@ def profile_data(profile: ProjectProfile) -> dict:
             data[name] = str(getattr(profile, name))
     if profile.health_url:
         data["health_url"] = profile.health_url
+    if profile.display_name:
+        data["display_name"] = profile.display_name
     if profile.services:
         data["services"] = [{"id": item.id, "log_source_ids": list(item.log_source_ids), "version_observation": version(item.version_observation),
             **({"health_url": item.health_url} if item.health_url else {}),
@@ -57,7 +61,21 @@ def list_profiles(directory: Path | None = None) -> tuple[list[ProjectProfile], 
     return profiles, errors
 
 
-def save_profile(data: dict, directory: Path | None = None) -> Path:
+def _replace_registration(temporary: Path, destination: Path, *, before_replace=None) -> None:
+    """Keep atomic replacement when Windows readers briefly deny deletion."""
+    for attempt in range(8):
+        if before_replace is not None:
+            before_replace()
+        try:
+            temporary.replace(destination)
+            return
+        except PermissionError as exc:
+            if getattr(exc, "winerror", None) not in {5, 32, 33} or attempt == 7:
+                raise
+            time.sleep(0.05 * (attempt + 1))
+
+
+def save_profile(data: dict, directory: Path | None = None, *, expected_sha256: str | None = None) -> Path:
     """Validate before replacing a registration; no target files are changed."""
     project_id = data.get("project_id")
     if not isinstance(project_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", project_id):
@@ -67,6 +85,11 @@ def save_profile(data: dict, directory: Path | None = None) -> Path:
     destination = directory / (project_id + ".json")
     if destination.is_symlink():
         raise ValueError("프로젝트 설정의 링크 파일을 교체할 수 없습니다")
+    def unchanged():
+        if expected_sha256 is not None and (not destination.is_file()
+                or hashlib.sha256(destination.read_bytes()).hexdigest() != expected_sha256):
+            raise ValueError("프로젝트 연결 설정이 변경됐습니다. 다시 불러온 뒤 저장해 주세요")
+    unchanged()
     raw = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
     if len(raw) > 64_000:
         raise ValueError("프로젝트 설정은 64 KB 이하여야 합니다")
@@ -75,7 +98,7 @@ def save_profile(data: dict, directory: Path | None = None) -> Path:
         with temporary.open("xb") as stream:
             stream.write(raw)
         load_project_profile(temporary)
-        temporary.replace(destination)
+        _replace_registration(temporary, destination, before_replace=unchanged)
     finally:
         temporary.unlink(missing_ok=True)
     return destination

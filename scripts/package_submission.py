@@ -23,8 +23,11 @@ TOP_LEVEL = [
     "nat_workflow.yml",
     "pyproject.toml",
     "requirements.txt",
+    "alembic.ini",
+    "deploy/.env.example",
+    "deploy/app.env.example",
 ]
-DIRECTORIES = ["tracebridge", "scripts", "tests", "skills", "docs", "pages", "examples"]
+DIRECTORIES = ["tracebridge", "scripts", "tests", "skills", "docs", "pages", "examples", "deploy", ".github"]
 SOURCE_SUFFIXES = {".py", ".md", ".json", ".jsonl", ".yml", ".yaml", ".toml", ".kts", ".kt", ".go", ".mod", ".log", ".lock"}
 EXCLUDED_PARTS = {"tmp", "temp", "output", "generated", "submission", "__pycache__", ".pytest_cache",
                   ".git", ".venv", ".uv-cache", "node_modules", ".codex", ".agents", ".codex-remote-attachments"}
@@ -53,9 +56,13 @@ def _safe_source(path: Path, root: Path) -> bool:
     relative = path.relative_to(root)
     permitted_image = path.suffix.lower() == ".png" and (
         relative.parts[:3] == ("examples", "evaluation", "assets")
-        or relative.parts[:4] == ("docs", "validation", "assets", "local-gui")
+        or relative.parts[:3] == ("docs", "validation", "assets") and len(relative.parts) > 3
+        and relative.parts[3] in {"local-gui", "basic-service", "project-connection"}
     )
-    return (path.suffix.lower() in SOURCE_SUFFIXES or permitted_image) and not runtime_artifact(path, root)
+    permitted_deploy = relative.parts[0] == "deploy" and (
+        path.name in {"Dockerfile", "Caddyfile", "Caddyfile.control-plane"}
+        or path.suffix.lower() in {".conf", ".template"})
+    return (path.suffix.lower() in SOURCE_SUFFIXES or permitted_image or permitted_deploy) and not runtime_artifact(path, root)
 
 
 def create_package(team_name: str | None = None, *, output_dir: str | Path | None = None,
@@ -79,7 +86,12 @@ def create_package(team_name: str | None = None, *, output_dir: str | Path | Non
     manifest = {"artifact_status": "DRAFT", "team_name": team_name,
                 "created_at": datetime.now(timezone.utc).isoformat(), "fresh_environment_verified": False,
                 "external_submission_performed": False, "source_changed_during_packaging": False, "files": {},
-                "limitations": ["Review archive; verification status is recorded in docs/validation/main-integration.md when available",
+                "verification_documents": [name for name in ("docs/current-state.md", "docs/validation/basic-service.md",
+                    "docs/validation/basic-service.json", "docs/validation/project-connection.md",
+                    "docs/validation/project-connection.json", "docs/validation/simple-project.md",
+                    "docs/validation/simple-project.json", "docs/validation/knowledge-review.md",
+                    "docs/validation/knowledge-review.json", "docs/README.md") if (root / name).is_file()],
+                "limitations": ["Review current scope and dated evidence in docs/current-state.md and docs/README.md",
                     "No runtime DB, secret, prior evaluation result or local output is included",
                     "New environment CLI/UI/restart verification remains a main integration gate"]}
     with ZipFile(destination, "x", compression=ZIP_DEFLATED) as archive:
@@ -93,7 +105,7 @@ def create_package(team_name: str | None = None, *, output_dir: str | Path | Non
             for name, item in manifest["files"].items())
         archive.writestr("DRAFT_PACKAGE_MANIFEST.json", json.dumps(manifest, ensure_ascii=False, indent=2))
         archive.writestr("DRAFT_NOTICE.md", "# DRAFT — 제출 전 검토용\n\n외부 제출을 수행하지 않은 검토용 묶음입니다. "
-                         "검증 범위는 docs/validation/main-integration.md와 DRAFT_PACKAGE_MANIFEST.json을 확인하세요. "
+                         "현재 검증 범위는 docs/current-state.md·docs/README.md와 DRAFT_PACKAGE_MANIFEST.json을 확인하세요. "
                          "평가·매뉴얼 자료는 출처가 붙은 합성 예시이며 실제 사건 해결 성능을 뜻하지 않습니다.\n")
     destination.with_suffix(".manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     return destination

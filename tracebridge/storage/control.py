@@ -82,6 +82,11 @@ class ControlTransaction:
     def events(self, job_id, after, limit):
         return self.connection.execute(select(s.job_events).where(s.job_events.c.job_id == job_id, s.job_events.c.id > after).order_by(s.job_events.c.id).limit(limit)).mappings().all()
 
+    def latest_event(self, job_id, kind):
+        # Workflow guards must inspect the full history, independently of UI pages.
+        return self.connection.execute(select(s.job_events).where(s.job_events.c.job_id == job_id,
+            s.job_events.c.kind == kind).order_by(s.job_events.c.id.desc()).limit(1)).mappings().first()
+
     def claim(self, runner_id, now):
         # Every claimant locks the same runner before testing its active jobs.
         runner = self.one(s.runners, id=runner_id, lock=True)
@@ -149,7 +154,8 @@ class ControlStore:
             def sqlite_integrity(connection, record):
                 connection.execute("PRAGMA foreign_keys=ON")
             with self.engine.begin() as connection:
-                for table in (s.index_jobs, s.storage_settings, s.query_embeddings):
+                connection.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS jobs_public_scope_key ON jobs(project_id,id)")
+                for table in (s.index_jobs, s.storage_settings, s.query_embeddings, s.service_policies, s.public_reports, s.public_limits):
                     table.create(connection, checkfirst=True)
                 connection.exec_driver_sql("""CREATE TRIGGER IF NOT EXISTS embedding_step_changed AFTER UPDATE OF state ON query_embeddings
                     WHEN old.state<>new.state BEGIN

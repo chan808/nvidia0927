@@ -154,7 +154,7 @@ class PostgresIncidentStore:
         row = db.execute(select(s.cards.c.card_json, s.runs.c.record_json, s.runs.c.executed_at)
             .join(s.runs, s.runs.c.run_id == s.cards.c.run_id).where(s.cards.c.project_id == project_id, s.cards.c.card_id == card_id)).first()
         if not row:
-            raise ValueError("Card not found in this project")
+            raise m.CardNotFound("Card not found in this project")
         card, record = json.loads(row[0]), json.loads(row[1])
         if card["project_id"] != project_id:
             raise ValueError("Card project scope mismatch")
@@ -169,23 +169,49 @@ class PostgresIncidentStore:
         with self.transaction() as db:
             return self._get_card(db, project_id, card_id)
 
-    def review_card(self, project_id, card_id, action, *, reviewer, changes=None, note=""):
+    def list_cards(self, project_id, *, status="PENDING", limit=20):
+        project_id = m._id(project_id, "project_id")
+        if status not in {"PENDING", "APPROVED", "EDITED", "REJECTED"} or type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("Known card status and limit 1-100 required")
+        with self.transaction() as db:
+            rows = db.execute(select(s.cards.c.card_json).join(s.runs, s.runs.c.run_id == s.cards.c.run_id)
+                .where(s.cards.c.project_id == project_id, s.cards.c.review_status == status)
+                .order_by(s.runs.c.executed_at.desc(), s.cards.c.card_id.desc()).limit(limit)).scalars().all()
+        return [json.loads(row) for row in rows]
+
+    def review_card(self, project_id, card_id, action, *, reviewer, changes=None, note="", outcome=None, expected_revision=None):
         reviewer = m._text(m._id(reviewer, "reviewer"), 80)
         changes = {} if changes is None else changes
         if (not isinstance(changes, dict) or action not in {"approve", "edit", "reject"} or set(changes) - m.EDITABLE
                 or action != "edit" and changes or action == "edit" and not changes):
             raise ValueError("Review edits may change wording and applicability only; factual verification is immutable")
+        if (outcome is not None and outcome not in m.REVIEW_OUTCOMES) or (action in {"approve", "edit"} and outcome == "INCONCLUSIVE"):
+            raise ValueError("A reusable card needs a concrete reviewed outcome")
+        if action == "reject" and outcome not in {None, "INCONCLUSIVE"}:
+            raise ValueError("Rejected cards must have an inconclusive outcome")
+        if outcome is not None and (not isinstance(note, str) or not note.strip()):
+            raise ValueError("A labeled review needs a reason")
+        if expected_revision is not None and (type(expected_revision) is not int or expected_revision < 0):
+            raise ValueError("Review revision must be a nonnegative integer")
         with self.transaction() as db:
             db.execute(select(s.cards.c.card_id).where(s.cards.c.project_id == project_id, s.cards.c.card_id == card_id).with_for_update())
             card = self._get_card(db, project_id, card_id)
+            if expected_revision is not None and card["review"]["revision"] != expected_revision:
+                raise m.ReviewConflict("Card changed; reload before reviewing")
+            if outcome == "RECOVERY_VERIFIED" and card.get("verification_results", {}).get("service_recovery", {}).get("status") != "RECORDED_VERIFIED":
+                raise ValueError("Recorded service recovery is required for this outcome")
             status = {"approve": "APPROVED", "edit": "EDITED", "reject": "REJECTED"}[action]
             revision = card["review"]["revision"] + 1
+            previous_outcome = card["review"].get("outcome")
+            labeled = outcome or ("INCONCLUSIVE" if action == "reject" else previous_outcome
+                if previous_outcome in m.REVIEW_OUTCOMES - {"INCONCLUSIVE"} else "UNLABELED_LEGACY")
             event = {"action": action, "reviewer": reviewer, "at": datetime.now(timezone.utc).isoformat(), "note": m._text(note, 300),
-                "before_status": card["review"]["status"], "before": {key: deepcopy(card[key]) for key in changes}, "changes": m._review_changes(card, changes, revision)}
+                "outcome": labeled, "before_status": card["review"]["status"], "before": {key: deepcopy(card[key]) for key in changes}, "changes": m._review_changes(card, changes, revision)}
             card.update(event["changes"])
             for key in changes:
                 card["field_sources"][key] = {"kind": "REVIEW_EDIT", "run_id": card["source_run_id"], "review_revision": revision, "reviewer": reviewer, "at": event["at"]}
-            card["review"] = {"status": status, "revision": revision, "reviewer": reviewer, "at": event["at"], "note": event["note"], "history": [*card["review"]["history"], event]}
+            card["review"] = {"status": status, "revision": revision, "reviewer": reviewer, "at": event["at"], "note": event["note"],
+                "outcome": labeled, "history": [*card["review"]["history"], event]}
             db.execute(update(s.cards).where(s.cards.c.project_id == project_id, s.cards.c.card_id == card_id).values(review_status=status, card_json=m._json(card)))
             db.execute(delete(s.card_search).where(s.card_search.c.card_id == card_id))
             db.execute(delete(s.card_embeddings).where(s.card_embeddings.c.project_id == project_id, s.card_embeddings.c.card_id == card_id))

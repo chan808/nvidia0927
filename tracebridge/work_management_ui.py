@@ -26,8 +26,8 @@ def _when(value):
     return datetime.fromtimestamp(value, timezone(timedelta(hours=9))).strftime("%m-%d %H:%M:%S KST")
 
 
-def render_work_queue(api, project_id: str) -> None:
-    with st.expander("프로젝트 작업 목록·저장된 결과", expanded=True):
+def render_work_queue(api, project_id: str, *, expanded=True) -> None:
+    with st.expander("프로젝트 작업 목록·저장된 결과", expanded=expanded):
         try:
             response = api.request("GET", f"/v1/projects/{project_id}/jobs")
             counts = response["counts"]

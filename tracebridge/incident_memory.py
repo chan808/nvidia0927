@@ -66,6 +66,17 @@ class RunConflict(ValueError):
     """An existing run ID or incident revision has different contents."""
 
 
+class CardNotFound(ValueError):
+    """A card is absent from the requested project."""
+
+
+class ReviewConflict(ValueError):
+    """The card changed after the reviewer loaded it."""
+
+
+REVIEW_OUTCOMES = {"GUIDANCE_CONFIRMED", "DEFECT_CONFIRMED_BY_OWNER", "RECOVERY_VERIFIED", "INCONCLUSIVE"}
+
+
 def db_location(path: str | Path | None = None) -> Path:
     value = path if path is not None else os.getenv("TRACEBRIDGE_DB_PATH") or "output/tracebridge/incidents.sqlite3"
     if str(value) == ":memory:":
@@ -464,6 +475,8 @@ def _enrich_card(card: dict, record: dict, job: dict | None = None, investigatio
             card["limitations"] = list(dict.fromkeys([*card["limitations"], *[_text(value) for value in job.get("limitations", [])]]))[:12]
     # These factual projections always come from source records, never editable card text.
     card["verification_results"] = _verification_results(record, job)
+    from .service_workflow import knowledge_quality
+    card["knowledge_quality"] = knowledge_quality(card)
     return card
 
 
@@ -841,12 +854,21 @@ class IncidentStore:
         result["history"] = [self.get_run(project_id, item["run_id"]) for item in incident["runs"][-7:-1]]
         return result
 
+    def list_cards(self, project_id: str, *, status: str = "PENDING", limit: int = 20) -> list[dict]:
+        project_id = _id(project_id, "project_id")
+        if status not in {"PENDING", "APPROVED", "EDITED", "REJECTED"} or type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("Known card status and limit 1-100 required")
+        rows = self.connection.execute("""SELECT c.card_json FROM cards c JOIN runs r ON r.run_id=c.run_id
+            WHERE c.project_id=? AND c.review_status=? ORDER BY r.executed_at DESC,c.card_id DESC LIMIT ?""",
+            (project_id, status, limit)).fetchall()
+        return [json.loads(row["card_json"]) for row in rows]
+
     def get_card(self, project_id: str, card_id: str) -> dict:
         row = self.connection.execute("""SELECT c.card_json,r.record_json,r.executed_at FROM cards c
             JOIN runs r ON r.run_id=c.run_id WHERE c.project_id=? AND c.card_id=?""",
             (_id(project_id, "project_id"), _id(card_id, "card_id"))).fetchone()
         if not row:
-            raise ValueError("Card not found in this project")
+            raise CardNotFound("Card not found in this project")
         card = json.loads(row["card_json"])
         if card["project_id"] != project_id:
             raise ValueError("Card project scope mismatch")
@@ -857,23 +879,40 @@ class IncidentStore:
         investigation = self.get_run(project_id, job["source_run_id"]) if job else None
         return _enrich_card(card, record, job, investigation)
 
-    def review_card(self, project_id: str, card_id: str, action: str, *, reviewer: str, changes: dict | None = None, note: str = "") -> dict:
+    def review_card(self, project_id: str, card_id: str, action: str, *, reviewer: str, changes: dict | None = None,
+                    note: str = "", outcome: str | None = None, expected_revision: int | None = None) -> dict:
         reviewer = _text(_id(reviewer, "reviewer"), 80)
         changes = {} if changes is None else changes
         if not isinstance(changes, dict) or action not in {"approve", "edit", "reject"} or set(changes) - EDITABLE or action != "edit" and changes or action == "edit" and not changes:
             raise ValueError("Review edits may change wording and applicability only; factual verification is immutable")
+        if (outcome is not None and outcome not in REVIEW_OUTCOMES) or (action in {"approve", "edit"} and outcome == "INCONCLUSIVE"):
+            raise ValueError("A reusable card needs a concrete reviewed outcome")
+        if action == "reject" and outcome not in {None, "INCONCLUSIVE"}:
+            raise ValueError("Rejected cards must have an inconclusive outcome")
+        if outcome is not None and (not isinstance(note, str) or not note.strip()):
+            raise ValueError("A labeled review needs a reason")
+        if expected_revision is not None and (type(expected_revision) is not int or expected_revision < 0):
+            raise ValueError("Review revision must be a nonnegative integer")
         with self.connection:
             self.connection.execute("BEGIN IMMEDIATE")
             card = self.get_card(project_id, card_id)
+            if expected_revision is not None and card["review"]["revision"] != expected_revision:
+                raise ReviewConflict("Card changed; reload before reviewing")
+            if outcome == "RECOVERY_VERIFIED" and card.get("verification_results", {}).get("service_recovery", {}).get("status") != "RECORDED_VERIFIED":
+                raise ValueError("Recorded service recovery is required for this outcome")
             status = {"approve": "APPROVED", "edit": "EDITED", "reject": "REJECTED"}[action]
             revision = card["review"]["revision"] + 1
+            previous_outcome = card["review"].get("outcome")
+            labeled = outcome or ("INCONCLUSIVE" if action == "reject" else previous_outcome
+                if previous_outcome in REVIEW_OUTCOMES - {"INCONCLUSIVE"} else "UNLABELED_LEGACY")
             checked = _review_changes(card, changes, revision)
             event = {"action": action, "reviewer": reviewer, "at": datetime.now(timezone.utc).isoformat(), "note": _text(note, 300),
-                "before_status": card["review"]["status"], "before": {key: deepcopy(card[key]) for key in changes}, "changes": checked}
+                "outcome": labeled, "before_status": card["review"]["status"], "before": {key: deepcopy(card[key]) for key in changes}, "changes": checked}
             card.update(event["changes"])
             for key in changes:
                 card["field_sources"][key] = {"kind": "REVIEW_EDIT", "run_id": card["source_run_id"], "review_revision": revision, "reviewer": reviewer, "at": event["at"]}
-            card["review"] = {"status": status, "revision": revision, "reviewer": reviewer, "at": event["at"], "note": event["note"], "history": [*card["review"]["history"], event]}
+            card["review"] = {"status": status, "revision": revision, "reviewer": reviewer, "at": event["at"], "note": event["note"],
+                "outcome": labeled, "history": [*card["review"]["history"], event]}
             self.connection.execute("UPDATE cards SET review_status=?,card_json=? WHERE project_id=? AND card_id=?", (status, _json(card), project_id, card_id))
             self.connection.execute("DELETE FROM card_search WHERE card_id=?", (card_id,))
             # An edited/rejected/reapproved card must never keep an old vector.

@@ -524,6 +524,72 @@ def compare_memory(rows: list[dict]) -> list[dict]:
     return comparisons
 
 
+def response_quality_comparison(rows: list[dict]) -> dict:
+    """Compare paired, labeled answers without treating synthetic timing as live quality."""
+    pairs = {}
+    for row in rows:
+        if row.get("condition") in {"tracebridge_memory_off", "tracebridge_memory_on"}:
+            pairs.setdefault(row["case_id"], {})[row["condition"]] = row
+    totals = {name: {"assessed": 0, "passed": 0, "wrong_guidance": 0, "unsupported_cause": 0,
+                     "unsupported_resolution": 0, "hold_cases": 0, "correct_holds": 0,
+                     "retrieval_hit_cases": 0, "model_calls_observed": 0, "model_calls_sum": 0,
+                     "elapsed_observed": 0, "elapsed_sum_ms": 0.0}
+              for name in ("tracebridge_memory_off", "tracebridge_memory_on")}
+    cases = []
+    for case_id, pair in sorted(pairs.items()):
+        off, on = pair.get("tracebridge_memory_off"), pair.get("tracebridge_memory_on")
+        if not off or not on or any(item.get("result") is None or item.get("execution_status") == "BLOCKED" for item in (off, on)):
+            cases.append({"case_id": case_id, "status": "NOT_COMPARABLE"})
+            continue
+        if off.get("execution_scope") != on.get("execution_scope") or off.get("provenance") != on.get("provenance") or off.get("expected") != on.get("expected"):
+            cases.append({"case_id": case_id, "status": "NOT_COMPARABLE"})
+            continue
+        checks = {}
+        for name, row in (("tracebridge_memory_off", off), ("tracebridge_memory_on", on)):
+            result, expected, tally = row["result"], row["expected"], totals[name]
+            allowed = expected.get("allowed", {}).get("route")
+            wrong_guidance = result.get("route") == "GUIDANCE" and allowed is not None and "GUIDANCE" not in allowed
+            unsupported_cause = expected.get("forbid_cause_confirmation") is True and result.get("cause_confirmed") is True
+            unsupported_resolution = expected.get("forbid_resolution_confirmation") is True and (
+                result.get("fix_applied") is True or result.get("fix_verified") is True or result.get("service_recovery") == "VERIFIED")
+            hold = expected.get("hold") is True
+            correct_hold = hold and result.get("route") in (allowed or []) and (not expected.get("requires_questions") or bool(result.get("questions")))
+            hit = (result.get("memory_search") or {}).get("hit_count", 0) > 0
+            tally["assessed"] += 1
+            tally["passed"] += row.get("assessment", {}).get("status") == "PASS"
+            tally["wrong_guidance"] += wrong_guidance
+            tally["unsupported_cause"] += unsupported_cause
+            tally["unsupported_resolution"] += unsupported_resolution
+            tally["hold_cases"] += hold
+            tally["correct_holds"] += correct_hold
+            tally["retrieval_hit_cases"] += hit
+            metrics = row.get("metrics", {})
+            calls, elapsed = metrics.get("model_calls"), metrics.get("total_elapsed_ms")
+            if type(calls) is int and calls >= 0:
+                tally["model_calls_observed"] += 1
+                tally["model_calls_sum"] += calls
+            if type(elapsed) in {int, float} and math.isfinite(elapsed) and elapsed >= 0:
+                tally["elapsed_observed"] += 1
+                tally["elapsed_sum_ms"] += elapsed
+            checks[name] = {"passed": row.get("assessment", {}).get("status") == "PASS",
+                "wrong_guidance": wrong_guidance, "unsupported_cause": unsupported_cause,
+                "unsupported_resolution": unsupported_resolution, "correct_hold": correct_hold if hold else None,
+                "retrieval_hit": hit}
+        cases.append({"case_id": case_id, "category": off.get("category"), "status": "PAIRED",
+            "off": checks["tracebridge_memory_off"], "on": checks["tracebridge_memory_on"]})
+    paired = [item for item in cases if item["status"] == "PAIRED"]
+    for tally in totals.values():
+        tally["mean_model_calls"] = round(tally["model_calls_sum"] / tally["model_calls_observed"], 3) if tally["model_calls_observed"] else None
+        tally["mean_elapsed_ms"] = round(tally["elapsed_sum_ms"] / tally["elapsed_observed"], 3) if tally["elapsed_observed"] else None
+    return {"evidence_scope": "PAIRED_SYNTHETIC_OR_IMPORTED_OBSERVATIONS", "memory_effect": "NOT_ESTABLISHED",
+        "paired_cases": len(paired), "not_comparable_cases": len(cases) - len(paired),
+        "better_on_fixed_checks": sum(item["on"]["passed"] and not item["off"]["passed"] for item in paired),
+        "worse_on_fixed_checks": sum(item["off"]["passed"] and not item["on"]["passed"] for item in paired),
+        "totals": totals, "cases": cases,
+        "limitations": ["Fixed labels and offline/double timing do not establish real-user accuracy, latency or cost improvement.",
+                        "A retrieval hit is a historical clue, not a verified current cause."]}
+
+
 def evaluate_suite(*, suite_path: str | Path = DEFAULT_SUITE, output_root: str | Path = ROOT / "output/parallel-d/evaluations",
                    conditions: list[str] | None = None, mode: str = "local",
                    adapters: dict[str, Callable] | None = None, initial_db: str | Path | None = None) -> dict:
@@ -619,7 +685,7 @@ def evaluate_suite(*, suite_path: str | Path = DEFAULT_SUITE, output_root: str |
     summary.update(execution_id=execution_id, output_dir=str(destination), suite_sha256=suite["fingerprint"],
                    code_changed_during_run=before["fingerprint"] != after["fingerprint"], code_after=after,
                    cases=12, result_rows=len(rows), external_calls_performed_by_runner=0,
-                   memory_comparison=compare_memory(rows))
+                   memory_comparison=compare_memory(rows), response_quality=response_quality_comparison(rows))
     _write(destination / "results.json", {"artifact_status": "DRAFT", "rows": rows})
     _write(destination / "summary.json", summary)
     return summary

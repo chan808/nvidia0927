@@ -24,8 +24,9 @@ def main(argv=None) -> int:
         adapters = {name: imported for name in args.conditions if name in available}
     summary = evaluate_suite(suite_path=args.suite, output_root=args.output, conditions=args.conditions,
                              mode=args.mode, adapters=adapters, initial_db=args.initial_db)
-    print(json.dumps({key: summary[key] for key in ("artifact_status", "output_dir", "cases", "result_rows",
-        "code_changed_during_run", "performance_claim", "memory_effect", "external_calls_performed_by_runner")}, ensure_ascii=False, indent=2))
+    print(json.dumps({**{key: summary[key] for key in ("artifact_status", "output_dir", "cases", "result_rows",
+        "code_changed_during_run", "performance_claim", "memory_effect", "external_calls_performed_by_runner")},
+        "response_quality": {key: value for key, value in summary["response_quality"].items() if key != "cases"}}, ensure_ascii=False, indent=2))
     groups = list(summary["groups"].values())
     if any(group["assessments"].get("FAIL") or group["executions"].get("FAILED") for group in groups):
         return 1

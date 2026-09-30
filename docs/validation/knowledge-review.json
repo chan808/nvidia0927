@@ -1,0 +1,95 @@
+{
+  "format": "tracebridge_knowledge_review_validation_v1",
+  "recorded_at": "2026-09-30T02:57:22.632998+00:00",
+  "local_date": "2026-09-30",
+  "timezone": "Asia/Seoul",
+  "status": "VERIFIED_OFFLINE_SYNTHETIC",
+  "full_regression": {
+    "tests": 787,
+    "passed": 787,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "junit_suite_seconds": 306.952,
+    "started_at": "2026-09-30T11:51:25.927114+09:00",
+    "junit_path": "output/knowledge-review-full.xml",
+    "junit_sha256": "9479ac0ffbde2845951c17e17a8c0217bbf548c275b0e683c75e74c74b88828a"
+  },
+  "related_regression": {
+    "passed": 94,
+    "failed": 0,
+    "elapsed_seconds": 50.4,
+    "scope": "SQLITE_POSTGRES_PUBLIC_RECOVERY_EXISTING_MEMORY_AND_FIXED_EVALUATION"
+  },
+  "quality_reports": {
+    "synthetic_doubles": {
+      "path": "output/knowledge-review/evaluations/20260930T024919-604a0d313a/response-quality.json",
+      "sha256": "1a7d0fd7eaf9863feef7faac5262ba1d99eb94b0c70efb83b7b1d0933d5f5096",
+      "paired_cases": 12,
+      "off_passed": 12,
+      "on_passed": 12,
+      "on_retrieval_hits": 11,
+      "external_calls": 0,
+      "effect": "NOT_ESTABLISHED"
+    },
+    "offline_local": {
+      "path": "output/knowledge-review/evaluations/20260930T024804-32a2085cf4/summary.json",
+      "sha256": "624ac4d2ff019adb602c4af31288ce90299594c7bd9624cc79b3865a8cccf8a7",
+      "paired_cases": 12,
+      "off_passed": 10,
+      "on_passed": 10,
+      "effect": "NOT_ESTABLISHED"
+    }
+  },
+  "real_project_data_modified": false,
+  "nvidia_live_calls": 0,
+  "source_hashes": {
+    "tracebridge/incident_memory.py": "496027a7504f326593754691f22cb67d996eba2a7aa682df33b4e2f314affaf5",
+    "tracebridge/storage/incidents.py": "a4a779fba38a5bcb19d65b3775ffd83bc843c04ea8d73439a9263527c40aa591",
+    "tracebridge/control_plane.py": "70276926fb3903d9cfec135266e867ae3197feeb4a71d3706f60388c30643e7b",
+    "tracebridge/public_service.py": "3ad09557136fc90fde978ae910eff50a3ccd656cfc795e268509b170537d220e",
+    "tracebridge/knowledge_review_ui.py": "cef493275ff7d582943978f6b4c94994b89ac4eeefac0827fc9669c8c66c643b",
+    "tracebridge/evaluation.py": "317e33fb4205209c0983c562ad7bbeb1674ee5eef93b845d842bbc46365e2a83",
+    "pages/3_Remote_Projects.py": "931d3af6d043bbe1324e71dd02616fcd02c3a9a7df46b46dd84d5ec7407f040f",
+    "scripts/evaluate_incidents.py": "1ab8c99e60edf67b77f813ae37cf75129a6a60cbb85dac8b65d1fc855835f998",
+    "scripts/evaluate_response_quality.py": "e3671b62b6afdbfb6bc4a6c38d34c00f3e700ba7bc66198425ad44bd586dc31d",
+    "tests/test_knowledge_review.py": "0dd0d45373bba0887f3c970dcb66254c1016b3bab6f8cd63af6d72b46deace71",
+    "tests/test_postgres_storage.py": "6b5374d1d7a40f446acbd20a7c602984cbf645d6bd46b23799b41185d348ec3c",
+    "scripts/package_submission.py": "4f23c4dca6977e8c9fd20bdff52b3e1522fddbd54f10fa0dc16a9ba580ae932f",
+    "tests/test_submission_package.py": "4b11e416a9fb0240857a29515be3e5b62e5598fc7dabc7ccf9efbd8ebfc1b61e"
+  },
+  "limitations": [
+    "No actual target service run or real user case labeling",
+    "Synthetic/model-double timing is not live latency or cost",
+    "Existing 12-case suite does not include photo-only browser submission",
+    "GitHub CI run and live NVIDIA calls were not performed"
+  ],
+  "final_targeted_regression": {
+    "tests": 6,
+    "passed": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "junit_suite_seconds": 6.09,
+    "started_at": "2026-09-30T11:57:38.196156+09:00",
+    "junit_path": "output/knowledge-review-final-target.xml",
+    "junit_sha256": "f9663fb7c91966e41892b4da8a5cf4848c5c04128c67ee957186394ece1210c6"
+  },
+  "source_audit": {
+    "markdown_files": 78,
+    "local_links_checked": 496,
+    "missing_links": 0,
+    "python_files_parsed": 132
+  },
+  "lazy_ui_regression": {
+    "tests": 5,
+    "passed": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "junit_suite_seconds": 5.121,
+    "started_at": "2026-09-30T12:00:37.508843+09:00",
+    "junit_path": "output/knowledge-review-lazy-ui-final.xml",
+    "junit_sha256": "5d5fa02fd8aa027d68a960f28bfc1a8dfcf387c0fa943399532e9a51ed722987"
+  }
+}

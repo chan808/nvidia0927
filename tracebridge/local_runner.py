@@ -5,6 +5,7 @@ import base64
 from datetime import datetime, timezone
 import json
 import os
+import re
 from pathlib import Path
 from types import SimpleNamespace
 import threading
@@ -15,7 +16,7 @@ import httpx
 from openai.types.chat import ChatCompletion
 
 from .incident_memory import IncidentStore
-from .project_health import inspect_project
+from .project_health import inspect_project, connection_checks
 from .project_registry import list_profiles
 from .project_profile import load_project_profile, select_project_service
 from .project_repair import NvidiaProjectProposer, prepare_project_change
@@ -45,7 +46,7 @@ class ControlClient:
         headers = {"Authorization": "Bearer " + self.token} if self.token else {}
         if idempotency_key:
             headers["Idempotency-Key"] = idempotency_key
-        timeout = 100 if path.endswith("/model") else 35 if path.endswith("/index") else 20 if path.endswith("/memory") else 10
+        timeout = 100 if path.endswith("/model") else 45 if path.endswith("/ocr") else 35 if path.endswith("/index") else 20 if path.endswith("/memory") else 10
         options = {} if hasattr(self.client, "app") else {"timeout": timeout}
         response = self.client.request(method, self.url + path, json=payload, headers=headers, **options)
         if not response.is_success:
@@ -68,10 +69,37 @@ class GatewayModelClient:
         if self.guard:
             self.guard()
         self.calls += 1
+        if [item["function"]["name"] for item in kwargs.get("tools", [])] == ["describe_screen"]:
+            from copy import deepcopy
+            kwargs = deepcopy(kwargs)
+            for message in kwargs["messages"]:
+                if isinstance(message.get("content"), list):
+                    for part in message["content"]:
+                        if part.get("type") == "image_url":
+                            part["image_url"]["url"] = "data:image/jpeg;base64," + self.job["input"]["image_b64"]
         data = self.api.request("POST", f"/v1/runner/jobs/{self.job['job_id']}/model",
             {"epoch": self.job["epoch"], "step_id": "model-" + str(self.calls), "payload": kwargs})
         self.provider_metadata = data.pop("_tracebridge_provider", {})
         return ChatCompletion.model_validate(data)
+
+
+class GatewayOCR:
+    """Only the server holds the OCR credential; the leased job owns the photo."""
+    def __init__(self, api, job, guard):
+        self.api, self.job, self.guard = api, job, guard
+
+    def extract(self, raw, *, deadline=None):
+        from .deadline import check_deadline, remaining_timeout
+        from .report_photo import decode_report_image
+        check_deadline(deadline)
+        self.guard()
+        if raw != decode_report_image(self.job["input"].get("image_b64")):
+            raise ValueError("Photo differs from the registered job")
+        data = self.api.request("POST", f"/v1/runner/jobs/{self.job['job_id']}/ocr",
+            {"epoch": self.job["epoch"], "step_id": "photo-ocr", "timeout_seconds": remaining_timeout(deadline, 35)})
+        self.guard()
+        check_deadline(deadline)
+        return data
 
 
 def _protect(raw: bytes) -> str:
@@ -158,21 +186,41 @@ class LocalRunner:
             from .project_repair import load_repair_policy
             enabled_ids = []
             recovery_policies = {}
+            auto_apply_ids = []
+            execution_modes = {}
+            policy_services = {}
             for id_ in profile.policy_refs:
                 try:
                     policy, digest = load_repair_policy(profile, id_)
                     if policy.enabled:
                         enabled_ids.append(id_)
+                        policy_services[id_] = profile.service if policy.repository_id == "primary" else next(item.service for item in profile.repositories if item.id == policy.repository_id)
+                        execution_modes[id_] = policy.execution_mode
                         if policy.recovery:
                             recovery_policies[id_] = {"policy_sha256": digest, "spec": policy.recovery.model_dump()}
+                            if policy.auto_apply_nonprod and policy.allow_apply:
+                                auto_apply_ids.append(id_)
                 except (ValueError, OSError):
                     continue
-            self.api.request("PUT", "/v1/runner/manifest", {"project_id": profile.project_id, "environment": profile.environment,
+            manifest = {"project_id": profile.project_id, "environment": profile.environment,
                 "service_ids": [item.id for item in profile.services] or [profile.service], "repository_ids": [item.id for item in profile.repositories],
                 "profile_sha256": sha256(profile.config_path.read_bytes()), "repair_enabled": bool(enabled_ids), "repair_policy_ids": enabled_ids, "status": health["status"],
                 "recovery_policy_ids": list(recovery_policies), "recovery_policies": recovery_policies,
+                "auto_apply_policy_ids": auto_apply_ids,
+                "repair_execution_modes": execution_modes,
                 "service_health": {item["id"]: item["service_status"] for item in health["services"]},
-                "health_checked_at": datetime.now(timezone.utc).isoformat()})
+                "health_checked_at": datetime.now(timezone.utc).isoformat(), "connection_checks": connection_checks(health)}
+            manifest.update(default_service=profile.service, display_name=profile.display_name, repair_policy_services=policy_services)
+            try:
+                self.api.request("PUT", "/v1/runner/manifest", manifest)
+            except GatewayError as exc:
+                # An older server still receives the original registration/health.
+                new_fields = {"connection_checks", "default_service", "display_name", "repair_policy_services"}
+                if exc.status_code != 422 or "extra_forbidden" not in str(exc) or not any(name in str(exc) for name in new_fields):
+                    raise
+                for name in new_fields:
+                    manifest.pop(name, None)
+                self.api.request("PUT", "/v1/runner/manifest", manifest)
         self.last_manifest = time.monotonic()
 
     def _guard(self):
@@ -234,6 +282,14 @@ class LocalRunner:
                 if job["kind"] == "prepare_change":
                     if not previous:
                         raise ValueError("Saved investigation required")
+                    from .project_repair import load_repair_policy, PolicyDenied
+                    if payload.get("intake_source") == "PUBLIC":
+                        authorization = self.api.request("GET", f"/v1/runner/jobs/{job['job_id']}/public-execution?epoch={job['epoch']}")
+                        if not authorization["allowed"]:
+                            raise PolicyDenied("Public execution permission changed")
+                    execution_policy, _ = load_repair_policy(profile, payload.get("policy_id"))
+                    if payload.get("intake_source") == "PUBLIC" and execution_policy.execution_mode != "DOCKER" and payload.get("model_is_double") is not True:
+                        raise PolicyDenied("Public model-generated candidates require OS isolation")
                     with IncidentStore(self.db_path) as store:
                         source = store.get_run(profile.project_id, previous["run_id"])
                     result = prepare_project_change(source, profile, policy_id=payload.get("policy_id"), db_path=self.db_path,
@@ -260,7 +316,9 @@ class LocalRunner:
                         use_nvidia=payload["use_nvidia"], client=gateway, db_path=self.db_path,
                         memory_enabled=payload["memory_enabled"], memory_lookup=memory_lookup,
                         max_seconds=payload.get("investigation_max_seconds", 90),
-                        previous_result=previous, run_id=payload["run_id"], incident_id=payload["incident_id"], message_received_at=payload["received_at"])
+                        previous_result=previous, run_id=payload["run_id"], incident_id=payload["incident_id"], message_received_at=payload["received_at"],
+                        image=base64.b64decode(payload["image_b64"]) if payload.get("image_b64") else None,
+                        ocr=GatewayOCR(self.api, job, self._guard) if payload.get("image_b64") and payload["use_nvidia"] else None)
                 result_path.write_bytes(json.dumps(result, ensure_ascii=False).encode())
             except Exception as exc:
                 try:
@@ -273,10 +331,49 @@ class LocalRunner:
                     self.active = None
                 raise
         self._guard()
+        if job["kind"] == "prepare_change" and job["input"].get("automation_mode") == "APPLY_NONPROD":
+            result = self.automatic_application(job, result)
+            result_path.write_bytes(json.dumps(result, ensure_ascii=False).encode())
+        self._guard()
         self.api.request("POST", f"/v1/runner/jobs/{job['job_id']}/result", {"epoch": job["epoch"], "result": result})
         (self.state_directory / (job["job_id"] + ".ack.json")).write_text('{"saved":true}')
         self.active = None
+        self.flush_applications()
         return {"job_id": job["job_id"], "status": "RESULT_SAVED"}
+
+    def automatic_application(self, job, result):
+        """Use the owner's two permissions and existing CAS/durable receipt path."""
+        if "automatic_application" in result:
+            return result  # A recorded failure/denial is not retried without a new job.
+        from .project_repair import load_repair_policy, apply_project_change, PolicyDenied
+        payload, candidate = job["input"], result["job"]
+        outcome = {"status": "WAITING_REVIEW", "risk_basis": "OWNER_ALLOWLIST_AND_BOUNDED_DIFF"}
+        if candidate.get("candidate_fix_verified") is not True:
+            result["automatic_application"] = {**outcome, "reason": "CANDIDATE_NOT_VERIFIED"}
+            return result
+        try:
+            self._guard()
+            authorization = self.api.request("GET", f"/v1/runner/jobs/{job['job_id']}/automatic-application?epoch={job['epoch']}")
+            profile = select_project_service(self.profiles[payload["project_id"]], payload["service"])
+            policy, policy_hash = load_repair_policy(profile, payload["policy_id"])
+            if (not authorization["allowed"] or not policy.auto_apply_nonprod or not policy.allow_apply
+                    or policy.recovery is None or policy.environment not in {"dev", "test", "staging"}
+                    or policy_hash != candidate["policy"]["sha256"] or payload["assessment"]["risk"] == "HIGH"):
+                raise PolicyDenied("Automatic application permission changed")
+            paths = candidate["diff"].get("paths", [])
+            diff = Path(candidate["diff"]["ref"]).read_text(encoding="utf-8")
+            changes = [line[1:] for line in diff.splitlines() if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))]
+            sensitive = r"auth|permission|credential|secret|password|payment|billing|migration|schema|session|token|delete|drop\s"
+            if len(paths) != 1 or not 1 <= len(changes) <= 40 or re.search(sensitive, "\n".join([*paths, *changes]), re.I):
+                raise PolicyDenied("Candidate requires owner risk review")
+            self._guard()
+            receipt = apply_project_change(payload["project_id"], candidate["work_id"], profile,
+                expected_diff_sha256=candidate["diff"]["sha256"], db_path=self.db_path)
+            outcome = {**outcome, "status": receipt["status"], "risk": "LOW", "work_id": candidate["work_id"]}
+        except (ValueError, OSError, GatewayError) as exc:
+            outcome["reason"] = type(exc).__name__
+        result["automatic_application"] = outcome
+        return result
 
     def flush_outbox(self):
         for result_path in list(self.state_directory.glob("*.result.json"))[:32]:

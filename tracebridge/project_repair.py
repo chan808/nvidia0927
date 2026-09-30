@@ -28,7 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .change_policy import PolicyDenied, json_bytes, sha256
 from .incident_memory import IncidentStore, db_location
 from .project_profile import ProjectProfile, load_project_profile, select_project_service
-from .project_registry import registry_directory
+from .project_registry import registry_directory, _replace_registration
 from .project_sources import redact, repository_revision, source_tree_dirty, SOURCE_SUFFIXES
 from .recovery_contract import RecoverySpec
 
@@ -62,6 +62,7 @@ class ProjectRepairPolicy(BaseModel):
     execution_mode: str = "TRUSTED_LOCAL"
     trust_project_code: bool = False
     allow_apply: bool = False
+    auto_apply_nonprod: bool = False
     allow_reproduction_without_logs: bool = False
     editable_paths: list[str] = Field(min_length=1, max_length=32)
     checks: list[CheckSpec] = Field(min_length=1, max_length=8)
@@ -166,6 +167,8 @@ def _validate_policy(data: dict) -> ProjectRepairPolicy:
         raise PolicyDenied("로컬 검사는 소유자가 신뢰하는 프로젝트 코드만 실행합니다")
     if policy.execution_mode == "DOCKER" and not policy.docker_image:
         raise PolicyDenied("Docker 검사에 사용할 로컬 이미지가 필요합니다")
+    if policy.auto_apply_nonprod and (not policy.enabled or not policy.allow_apply or policy.recovery is None):
+        raise PolicyDenied("비운영 자동 적용에는 활성화된 적용 권한과 회복 검사가 필요합니다")
     ids = [check.id for check in policy.checks]
     if len(set(ids)) != len(ids) or policy.reproduction_check_id not in ids or policy.regression_check_id not in ids:
         raise PolicyDenied("재현·회귀 검사 ID는 고유한 등록 검사를 가리켜야 합니다")
@@ -198,8 +201,11 @@ def save_repair_policy(data: dict, profile: ProjectProfile, directory: Path | No
     if destination.is_symlink():
         raise PolicyDenied("정책 링크 파일은 교체할 수 없습니다")
     temporary = directory / (".policy-" + uuid4().hex + ".json")
-    temporary.write_bytes(json_bytes(policy.model_dump()))
-    temporary.replace(destination)
+    try:
+        temporary.write_bytes(json_bytes(policy.model_dump()))
+        _replace_registration(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
     return destination
 
 
@@ -239,6 +245,10 @@ def _repository(profile: ProjectProfile, policy: ProjectRepairPolicy) -> Path:
 def repair_blockers(source: dict, profile: ProjectProfile, policy: ProjectRepairPolicy) -> list[str]:
     aggregate = source.get("log_scope", {}).get("aggregate", {})
     blockers = []
+    registered = load_project_profile(profile.config_path) if profile.config_path else profile
+    policy_service = registered.service if policy.repository_id == "primary" else next((item.service for item in registered.repositories if item.id == policy.repository_id), None)
+    if policy_service != profile.service:
+        blockers.append("조사한 앱과 수정 검사 대상이 다릅니다")
     if not policy.enabled:
         blockers.append("프로젝트 소유자가 수정 후보·검사 실행을 허용하지 않았습니다")
     if source.get("project_id") != profile.project_id:

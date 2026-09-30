@@ -69,6 +69,7 @@ class ProjectProfile:
     repositories: tuple[RegisteredRepository, ...] = ()
     services: tuple[RegisteredService, ...] = ()
     health_url: str | None = None
+    display_name: str | None = None
 
 
 def select_project_service(profile: ProjectProfile, service: str | None = None) -> ProjectProfile:
@@ -177,10 +178,13 @@ def load_project_profile(path: str | Path) -> ProjectProfile:
     allowed = {
         "project_id", "service", "environment", "root", "code_roots", "log_sources",
         "openapi_path", "dto_path", "caller_evidence_path", "version_observation", "policy_refs", "repositories", "services",
-        "health_url",
+        "health_url", "display_name",
     }
     if not isinstance(data, dict) or set(data) - allowed:
         raise EvidenceError("Project profile contains unsupported settings (including execution or secrets)")
+    display_name = data.get("display_name")
+    if display_name is not None and (not isinstance(display_name, str) or not display_name.strip() or len(display_name) > 80):
+        raise EvidenceError("프로젝트 이름은 1~80자여야 합니다")
     root_value = data.get("root", ".")
     root_text = _text(root_value, "Project root")
     if "://" in root_text or root_text.startswith(("\\\\", "//")):
@@ -289,7 +293,7 @@ def load_project_profile(path: str | Path) -> ProjectProfile:
         version_observation=VersionObservation(method, registered_path(resolver, version.get("path")) if method == "json_file" else None,
                                                _text(version.get("field", "version"), "Version field")),
         policy_refs=tuple(policies), config_path=config_path, repositories=tuple(registered), services=tuple(services),
-        health_url=_health_url(data.get("health_url")), **optional,
+        health_url=_health_url(data.get("health_url")), display_name=display_name, **optional,
     )
 
 

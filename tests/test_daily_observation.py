@@ -105,7 +105,7 @@ def test_health_registration_rejects_external_or_credential_urls(url):
 
 
 @pytest.mark.parametrize("status,body,expected", [(200, {"status": "UP", "secret": "discard"}, "UP"),
-    (200, {"status": "DOWN"}, "DOWN"), (503, {}, "UNREACHABLE"), (302, {}, "UNREACHABLE"),
+    (200, {"status": "DOWN"}, "DOWN"), (503, {}, "DOWN"), (302, {}, "UNKNOWN"),
     (200, {"status": ["invalid"]}, "REACHABLE")])
 def test_health_observation_uses_status_only_and_does_not_follow_redirects(monkeypatch, status, body, expected):
     original = httpx.Client

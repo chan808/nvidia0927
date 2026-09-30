@@ -1,0 +1,61 @@
+{
+  "format": "tracebridge_simple_project_validation_v1",
+  "recorded_at": "2026-09-29T23:18:01.509385+00:00",
+  "local_date": "2026-09-30",
+  "timezone": "Asia/Seoul",
+  "status": "VERIFIED_LOCAL_WITH_TARGET_UNREACHABLE",
+  "full_regression": {
+    "tests": 782,
+    "passed": 782,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "junit_suite_seconds": 307.921,
+    "started_at": "2026-09-30T01:13:33.888500+09:00",
+    "junit_path": "output/simple-project-full-final.xml",
+    "junit_sha256": "0878024aaaeb1558256bdb6adccc95ba334a51ce341af9fc50fe4b47df66bb0b"
+  },
+  "evidence_scope": "STREAMLIT_APPTEST_BROWSER_UI_PRIVATE_FASTAPI_RUNNER_POSTGRESQL",
+  "model_mode": "TEST_DOUBLE_FOR_NEW_PHOTO_PATH",
+  "nvidia_live_calls": 0,
+  "browser_photo_upload_submitted": false,
+  "target_service_http": "FRONTEND_AND_BACKEND_CONNECTION_FAILED_DURING_BROWSER_CHECK",
+  "verified": [
+    "SINGLE_DEFAULT_PROJECT_PAGE_WITH_HIDDEN_NAVIGATION",
+    "THREE_FIELD_LOCAL_PROJECT_SETUP_AND_SCOPED_RUNNER",
+    "SIMPLE_TEXT_OR_PHOTO_REPORT_WITH_SEPARATE_AI_CONSENT",
+    "PRIVATE_OCR_VISION_BOUND_TO_LEASED_JOB_PHOTO",
+    "ADVANCED_SERVICE_AND_REPAIR_POLICY",
+    "RIGHT_SIDE_RUNNER_AND_TARGET_SERVICE_STATUS",
+    "EXISTING_OWNER_CREDENTIALS_PROFILE_AND_FOUR_JOBS_PRESERVED",
+    "REAL_POSTGRESQL_FULL_REGRESSION"
+  ],
+  "source_hashes": {
+    "app.py": "6ef4f7d7d1e1e7ea74c2b040f62d987e545da27fe6fe54f7c1d91b787cb90c68",
+    "pages/3_Remote_Projects.py": "ed3c23da1bddbe921b1d99db1795dc251d2e86c2bfcd4bee5357567752fdf6f7",
+    "tracebridge/control_plane.py": "704bc4f27a8aa37f9ad8fbf005bfaf29426af5c04224c5b0a661f5a9aa250933",
+    "tracebridge/local_runner.py": "5ef7699b8605636df54aa49e000c13ae67a5d68c0d5cb39d602511a67bc5082d",
+    "tracebridge/project_connection_ui.py": "30da637af9259a195edec7dcbaba3762fa9ee0d9bee8e29e998a01b6063ac958",
+    "tracebridge/project_profile.py": "1752e69e73a2d8f7016ae8c258804e4d73130a25012b7d2c0450e68dbf3d1b18",
+    "tracebridge/project_registry.py": "adb75bd9672454425309cebea47ed9ce94e3db8a16d7be5efb68001a510d4c7d",
+    "tracebridge/project_setup_ui.py": "50abc64aa1dbed5f593026f54240c1c785453ff5076b7c10188b58f86fa43544",
+    "tracebridge/report_photo.py": "1909ce00198010ceaf638304f3f9365afdc4115c5ac7b7f61dbd3c57170fcb7c",
+    "tests/test_simple_project_flow.py": "fc6b47ad12a85823d779cb1356c3f25c59bd3c7684cd192d05546e700c3e86ab",
+    "tests/test_submission_package.py": "043eb1fc8327ff26705d040bf4c8b98777efa61bb150367372ae70351fa44868",
+    "scripts/package_submission.py": "4e1c1d79812be07b0413008333c8ce66ac85e1f3c551a77f80ba8564c1c0812c"
+  },
+  "screenshot_hashes": {
+    "docs/validation/assets/project-connection/simple-dashboard.png": "84ea58a8db322f186acedc78edddb45bcd615649738fde39dbccc1f2d571e5f1"
+  },
+  "targeted_regression": {
+    "tests": 27,
+    "passed": 27,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "junit_suite_seconds": 20.302,
+    "started_at": "2026-09-30T08:18:12.062586+09:00",
+    "junit_path": "output/simple-project-target-final.xml",
+    "junit_sha256": "c8231d418a90f7db9b2b373b155a9eb28a2aa003176b2dc9800791f433cc95bf"
+  }
+}

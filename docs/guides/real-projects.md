@@ -4,7 +4,7 @@
 
 ## 이 PC에서 바로 사용
 
-2026-09-29 최종 검증에서 세 프로세스를 연결해 실행했다: [제보 웹](http://127.0.0.1:8502), 로컬 API `127.0.0.1:8765`, `daily-local`에 페어링된 PC 실행기. 기존 8501 포트와 충돌을 피하기 위해 웹은 8502를 사용했다. 웹의 **연결된 프로젝트 제보**에서 `daily-local`과 frontend/backend를 선택하면 된다. **제보 에이전트**는 같은 PC에서 바로 조사하는 화면이다. 아래 재실행 명령은 이 PC에 남긴 로컬 설정을 사용한다.
+2026-09-30 간편 화면에서 세 프로세스를 연결해 실행한다: [제보 웹](http://127.0.0.1:8502), 로컬 API `127.0.0.1:8765`, `daily-local`에 페어링된 PC 실행기. 기존 8501 포트와 충돌을 피하기 위해 웹은 8502를 사용한다. 웹 기본 화면 **연결된 프로젝트**에서 프로젝트를 고르고 오른쪽 연결 상태를 본 뒤 글이나 사진을 보낸다. 서비스 범위 선택은 고급 설정에 있다. 아래 재실행 명령은 이 PC에 남긴 로컬 설정을 사용한다.
 
 [최종 GUI 검증](../validation/local-gui-final.md)에서 실제 경로·정책 등록, 제보·답변, 실제 모델 후보, 검토 후 원본 적용과 재열기, PC 중단·재연결을 확인했다. 공개 검증용 `gui-local-37a6651e`의 수정된 예시와 저장된 사건도 목록에 남겨 두었다. 최종 세션에서 daily 개발 서버 3100/8081은 응답하지 않았으며 PC 실행기의 온라인 상태는 코드 파일 조회 가능 상태다.
 
@@ -15,6 +15,7 @@ $env:TRACEBRIDGE_OPERATOR_TOKEN_FILE=(Resolve-Path output/local-service/control-
 $env:TRACEBRIDGE_CONTROL_DB=(Join-Path (Get-Location) 'output/local-service/control-plane/state.sqlite3')
 $env:TRACEBRIDGE_CONTROL_URL='http://127.0.0.1:8765'
 $env:TRACEBRIDGE_PROJECT_PROFILE=(Resolve-Path output/project-profiles/daily-local.json).Path
+$env:TRACEBRIDGE_PROJECT_REGISTRY=(Resolve-Path output/project-profiles).Path
 $env:TRACEBRIDGE_ALLOW_PROJECT_REGISTRATION='1'
 # 각각 별도 터미널에서 실행
 .\.venv\Scripts\python.exe -m scripts.serve_control --host 127.0.0.1 --port 8765
@@ -29,7 +30,7 @@ $env:TRACEBRIDGE_ALLOW_PROJECT_REGISTRATION="1"
 .\.venv\Scripts\python.exe -m streamlit run app.py --server.address 127.0.0.1
 ```
 
-**제보 에이전트**에서 프로젝트를 선택하고 증상·기대한 동작·대략적인 시각을 적는다. 사이드바의 프로젝트 경로 등록에서 프론트·백엔드·로그의 독립 경로를 추가할 수 있다. 경로는 이 프로그램을 실행하는 PC 기준이다. 서버에 배포한 화면에서 PC 경로를 입력하는 방식은 사용하지 않는다.
+**연결된 프로젝트**에서 이름·프로젝트 폴더·선택적 실행 주소를 등록하고 증상·사진을 보낸다. 여러 앱의 코드·로그·계약·실행 버전을 연결하거나 직접 점검하려면 고급 설정을 연다. [간편 사용법](simple-project.md)과 [상세 경로·직접 점검](project-connection.md)을 확인한다. 경로는 이 프로그램을 실행하는 PC 기준이다. 서버에 배포한 화면에서 PC 경로를 입력하는 방식은 사용하지 않는다.
 
 현재 PC에는 `daily-local`을 다음 실제 경로로 등록했다.
 
@@ -150,7 +151,7 @@ Node 검사에는 셸/배치 파일 대신 실제 node 실행파일과 `node_mod
 
 ## 배포 웹과 PC 연결
 
-현재 원격 기능은 **소유자 한 명의 비공개 시범**이다. 웹은 운영자 secret으로 API를 사용하고 실행기는 프로젝트가 제한된 별도 credential을 쓴다. 공개 다중 사용자 로그인·조직별 membership·원격 사진 처리·자동 배포는 이 시범에 포함되지 않는다.
+현재 원격 기능은 **소유자 한 명의 비공개 시범**이다. 웹은 운영자 secret으로 API를 사용하고 실행기는 프로젝트가 제한된 별도 credential을 쓴다. 소유자 전용 원격 사진 처리는 제공하며 공개 사진 접수·공개 다중 사용자 로그인·조직별 membership·자동 배포는 이 시범에 포함되지 않는다.
 
 서버 환경에는 `.[test,service]`를 설치하고 NVIDIA 키를 둔다. PC 실행기에는 NVIDIA 키가 필요 없다.
 
@@ -162,7 +163,7 @@ $env:TRACEBRIDGE_CONTROL_URL="http://127.0.0.1:8765"
 .\.venv\Scripts\python.exe -m scripts.serve_control --port 8765
 ```
 
-웹 프로세스에도 같은 API URL과 operator token 파일을 설정한 뒤 **연결된 프로젝트 제보** 페이지에서 등록 프로젝트 ID의 5분 유효 페어링 코드를 만든다. 실제 배포는 HTTPS URL을 사용한다. PC에서 일회용 코드를 입력하고 실행한다.
+웹 프로세스에도 같은 API URL과 operator token 파일을 설정한 뒤 **연결된 프로젝트 → 고급 설정 → 다른 컴퓨터 연결**에서 등록 프로젝트 ID의 5분 유효 페어링 코드를 만든다. 실제 배포는 HTTPS URL을 사용한다. PC에서 일회용 코드를 입력하고 실행한다.
 
 ```powershell
 .\.venv\Scripts\python.exe -m scripts.local_runner --config output/local-runner/config.json pair --url https://YOUR_DOMAIN
@@ -203,6 +204,6 @@ docker compose --env-file deploy/.env -f deploy/compose.yaml -f deploy/control-p
 3. `정원 5인데 5개 항목을 등록하면 거절됩니다. 요청 ID gui-quota-001`로 제보하고, 같은 사건에 출력의 `received_at`을 답변한다. 코드 가설과 정확 로그 연결 상태를 확인한다.
 4. NVIDIA 사용을 선택하고 후보를 준비한다. 실제 API 비용이 발생한다. provider 오류이면 실패 기록을 확인하고 같은 사건에서 다시 조사·준비한다. 후보가 성공하면 수정 전 실패·수정 후 성공·회귀 성공과 `< 5`에서 `<= 5`로 바뀐 diff를 확인한다.
 5. diff 검토 체크 후 공개 예시 원본에 적용한다. 웹을 새로 열고 프로젝트 선택·저장된 사건 불러오기로 `APPLIED`와 검사가 유지되는지 확인한다.
-6. 원격 연결은 앞 절차로 PC를 페어링한 뒤 **연결된 프로젝트 제보**에서 확인한다. 실행기 종료 시 오프라인·대기, 재시작 후 완료된 작업의 결과 재전송과 모델 호출 횟수를 확인한다.
+6. 원격 연결은 앞 절차로 PC를 페어링한 뒤 **연결된 프로젝트**에서 확인한다. 실행기 종료 시 오프라인·대기, 재시작 후 완료된 작업의 결과 재전송과 모델 호출 횟수를 확인한다.
 
 이 예시는 일반 프로젝트의 경로·로그·수정·검사·저장을 확인하는 공개 합성 자료다. 실제 서비스 재기동이나 DB 변경을 수행하지 않으며, 실제 daily 장애 해결의 증거로 사용하지 않는다.

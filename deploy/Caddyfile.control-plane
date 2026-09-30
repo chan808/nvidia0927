@@ -3,6 +3,9 @@
 }
 
 {$TRACEBRIDGE_DOMAIN} {
+    handle /report/* {
+        reverse_proxy control:8765
+    }
     # API uses scoped bearer credentials; its pairing endpoint uses a one-use code.
     handle /v1/* {
         reverse_proxy control:8765

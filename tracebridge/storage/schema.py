@@ -1,5 +1,5 @@
 """Storage-neutral scalar records; original JSON and opaque digests are preserved."""
-from sqlalchemy import Column, Float, Integer, MetaData, Table, Text, UniqueConstraint, ForeignKey, CheckConstraint
+from sqlalchemy import Column, Float, Integer, MetaData, Table, Text, UniqueConstraint, ForeignKey, ForeignKeyConstraint, CheckConstraint
 from sqlalchemy.types import UserDefinedType
 
 class NativeVector(UserDefinedType):
@@ -30,7 +30,8 @@ jobs = table("jobs", text("id", primary_key=True), text("project_id", nullable=F
     Column("expires", Float, nullable=False), text("result"), text("result_hash"), Column("created", Float, nullable=False),
     Column("priority", Integer, nullable=False, default=2), text("assessment_json", nullable=False, default="{}"),
     Column("assessment_revision", Integer, nullable=False, default=1), UniqueConstraint("project_id", "idempotency_key"),
-    CheckConstraint("priority BETWEEN 0 AND 3"), CheckConstraint("epoch >= 0"), CheckConstraint("assessment_revision >= 1"))
+    CheckConstraint("priority BETWEEN 0 AND 3"), CheckConstraint("epoch >= 0"), CheckConstraint("assessment_revision >= 1"),
+    UniqueConstraint("project_id", "id", name="jobs_public_scope_key"))
 model_steps = table("model_steps", text("job_id", ForeignKey("jobs.id"), primary_key=True), text("step_id", primary_key=True), text("input_hash", nullable=False), text("state", nullable=False), text("response"))
 job_events = table("job_events", Column("id", Integer, primary_key=True, autoincrement=True), text("job_id", ForeignKey("jobs.id"), nullable=False), text("kind", nullable=False),
     text("from_state"), text("to_state"), Column("epoch", Integer, nullable=False), Column("occurred", Float, nullable=False), text("metadata_json", nullable=False))
@@ -58,3 +59,16 @@ index_jobs = table("index_jobs", text("id", primary_key=True), text("project_id"
 storage_settings = table("storage_settings", text("key", primary_key=True), text("value", nullable=False))
 query_embeddings = table("query_embeddings", text("job_id", ForeignKey("jobs.id"), primary_key=True), text("query_hash", primary_key=True),
     text("model_key", primary_key=True), text("state", nullable=False), text("vector_json"), text("error_type"), Column("created", Float, nullable=False))
+
+service_policies = table("service_policies", text("project_id", ForeignKey("bindings.project_id"), primary_key=True),
+    text("policy_json", nullable=False), Column("revision", Integer, nullable=False), Column("updated", Float, nullable=False))
+public_reports = table("public_reports", text("id", primary_key=True), text("project_id", ForeignKey("bindings.project_id"), nullable=False),
+    text("access_digest", nullable=False), text("submission_digest", nullable=False), text("input_hash", nullable=False),
+    text("dedupe_hash", nullable=False), text("service", nullable=False), text("root_job_id", ForeignKey("jobs.id"), nullable=False),
+    text("latest_job_id", ForeignKey("jobs.id"), nullable=False), Column("created", Float, nullable=False),
+    Column("expires", Float, nullable=False), Column("answers", Integer, nullable=False, default=0),
+    UniqueConstraint("project_id", "submission_digest"),
+    ForeignKeyConstraint(["project_id", "root_job_id"], ["jobs.project_id", "jobs.id"]),
+    ForeignKeyConstraint(["project_id", "latest_job_id"], ["jobs.project_id", "jobs.id"]))
+public_limits = table("public_limits", text("key", primary_key=True), Column("count", Integer, nullable=False),
+    Column("expires", Float, nullable=False))
