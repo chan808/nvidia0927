@@ -45,6 +45,7 @@
 
 ## 검증 기록
 
+- [Linux CI·임대 재전송 재검증](validation/ci-portability.md): Windows 전용 잠금·개행·오래된 임대 갱신 경합과 수정 후 전체 회귀
 - [사건 지식·답변 비교](validation/knowledge-review.md): 소유자 카드 검토, SQLite/PostgreSQL·화면 검사, 합성 기억 끔/켬 비교
 - [간편 프로젝트 검증](validation/simple-project.md): 한 화면 등록·글/사진 제보·연결 상태, 사진 분석 동의, 실제 브라우저와 전체 회귀
 - [프로젝트 연결 검증](validation/project-connection.md): 경로 편집·설정 보존, 서비스별 HTTP·자료 진단, 실제 브라우저와 전체 회귀

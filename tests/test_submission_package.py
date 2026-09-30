@@ -32,6 +32,7 @@ def test_submission_contains_working_pages_inputs_and_fixture_manifests():
         "tracebridge/knowledge_review_ui.py", "scripts/evaluate_response_quality.py",
         "tests/test_knowledge_review.py", "docs/guides/knowledge-review.md",
         "docs/validation/knowledge-review.md", "docs/validation/knowledge-review.json",
+        "docs/validation/ci-portability.md", "docs/validation/ci-portability.json",
         "deploy/Dockerfile", "deploy/Caddyfile.control-plane", ".github/workflows/regression.yml",
     ):
         assert expected in names
@@ -39,6 +40,7 @@ def test_submission_contains_working_pages_inputs_and_fixture_manifests():
     assert "docs/validation/project-connection.md" in manifest["verification_documents"]
     assert "docs/validation/simple-project.md" in manifest["verification_documents"]
     assert "docs/validation/knowledge-review.md" in manifest["verification_documents"]
+    assert "docs/validation/ci-portability.md" in manifest["verification_documents"]
     assert not manifest["source_changed_during_packaging"]
     assert ".env" not in names
     assert not any(name.startswith((".codex-remote-attachments/", "output/", ".venv/")) for name in names)

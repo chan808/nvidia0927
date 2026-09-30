@@ -1,0 +1,56 @@
+{
+  "format": "tracebridge_ci_portability_validation_v1",
+  "recorded_at": "2026-09-30T03:32:41.249679+00:00",
+  "local_date": "2026-09-30",
+  "timezone": "Asia/Seoul",
+  "status": "LOCAL_VERIFIED_CI_STATUS_AT_WORKFLOW_LINK",
+  "full_regression": {
+    "tests": 790,
+    "passed": 790,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "junit_suite_seconds": 283.037,
+    "started_at": "2026-09-30T12:26:41.279714+09:00",
+    "junit_path": "output/ci-lease-full.xml",
+    "junit_sha256": "5e5c3f28c33bd9248eae28908ca17c08017554ce38603629aeb4f7a4b358d0ff"
+  },
+  "targeted_lease_regression": {
+    "passed": 6,
+    "failed": 0,
+    "elapsed_seconds": 7.53
+  },
+  "initial_ci_failures": [
+    "https://github.com/chan808/nvidia0927/actions/runs/36663354922",
+    "https://github.com/chan808/nvidia0927/actions/runs/36663827544"
+  ],
+  "current_ci_workflow": "https://github.com/chan808/nvidia0927/actions/workflows/regression.yml",
+  "postgres_test_databases_remaining": 0,
+  "source_hashes": {
+    "tracebridge/local_runner.py": "f394251115c24d99c82efba4db7a9e2c521d0efb9dbc3deafaa77f306c4563ad",
+    "tests/test_control_plane.py": "1db22c429b5800886a482c9cfe9988a8b5db1bb795ca57d20daec83f22bce4b0",
+    "tests/test_parallel_d_evaluation.py": "f8c18d0f959a79ce8af7a325489c5a251f28241a2371eedb271cf5a2d1a9efc2",
+    "tests/test_registered_project_repair.py": "c07428cce131b0dc99265170ac2a5bbbe2a4e699e6df3604986b675beed85e75",
+    "scripts/package_submission.py": "0713ceb319a023584896dcfb19fcff6e61822b725abfe80c3a969d3bb87d8f2a",
+    "tests/test_submission_package.py": "7804e33e54cd546b44373e94866803a5f4f244f596d6b95c901dcae4a1f5acb0"
+  },
+  "real_project_data_modified": false,
+  "nvidia_live_calls": 0,
+  "package_and_lease_regression": {
+    "tests": 4,
+    "passed": 4,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "junit_suite_seconds": 2.807,
+    "junit_path": "output/ci-portability-package.xml",
+    "junit_sha256": "05cad56a92c2f9d585c378256fcc586d36259785d1fe4847a7517659901f0049"
+  },
+  "source_audit": {
+    "markdown_files": 79,
+    "local_links_checked": 501,
+    "missing_links": 0,
+    "python_files_parsed": 132,
+    "pip_check": "PASS"
+  }
+}

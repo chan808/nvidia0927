@@ -1,6 +1,6 @@
 # 검증 절차
 
-명령은 저장소 루트에서 실행합니다. 현재 지원 환경과 설치는 [시작하기](getting-started.md)를 먼저 보세요. 최신 경로·연결 진단과 회귀는 [프로젝트 연결 검증](../validation/project-connection.md), 공개 자동 처리는 [기본 서비스 검증](../validation/basic-service.md), 이전 적용 후 확인은 [서비스 확인 검증](../validation/project-recovery.md), 저장·검색 통합은 [PostgreSQL 재검토](../validation/postgres-rag-review.md)에 기록돼 있습니다. [최종 로컬 통합](../validation/main-integration.md)은 이전 단계의 기록입니다.
+명령은 저장소 루트에서 실행합니다. 현재 지원 환경과 설치는 [시작하기](getting-started.md)를 먼저 보세요. 최신 전체 회귀와 Linux CI 차이는 [CI 재검증](../validation/ci-portability.md), 경로·연결 진단은 [프로젝트 연결 검증](../validation/project-connection.md), 공개 자동 처리는 [기본 서비스 검증](../validation/basic-service.md), 이전 적용 후 확인은 [서비스 확인 검증](../validation/project-recovery.md), 저장·검색 통합은 [PostgreSQL 재검토](../validation/postgres-rag-review.md)에 기록돼 있습니다. [최종 로컬 통합](../validation/main-integration.md)은 이전 단계의 기록입니다.
 
 ## 오프라인 기능 확인
 

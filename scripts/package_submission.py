@@ -90,7 +90,8 @@ def create_package(team_name: str | None = None, *, output_dir: str | Path | Non
                     "docs/validation/basic-service.json", "docs/validation/project-connection.md",
                     "docs/validation/project-connection.json", "docs/validation/simple-project.md",
                     "docs/validation/simple-project.json", "docs/validation/knowledge-review.md",
-                    "docs/validation/knowledge-review.json", "docs/README.md") if (root / name).is_file()],
+                    "docs/validation/knowledge-review.json", "docs/validation/ci-portability.md",
+                    "docs/validation/ci-portability.json", "docs/README.md") if (root / name).is_file()],
                 "limitations": ["Review current scope and dated evidence in docs/current-state.md and docs/README.md",
                     "No runtime DB, secret, prior evaluation result or local output is included",
                     "New environment CLI/UI/restart verification remains a main integration gate"]}

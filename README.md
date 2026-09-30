@@ -39,7 +39,7 @@
 
 **로컬 운영과 등록 프로젝트의 원격 작업을 제공합니다.** 소유자가 켠 프로젝트는 공개 제보·후속 답변·제보별 상태 조회를 제공합니다. 등록 정책의 수정 후보 준비와 선택적 비운영 적용·회복 확인을 연결하며, 서버 API·PC 실행기로 작업과 NVIDIA 호출을 분리합니다. 팀·조직별 인증, 공개 사진 접수, 자동 배포·대상 서비스 기동은 후속 범위입니다. 로컬 신뢰 코드 실행과 Docker 설정의 격리 범위를 구분합니다.
 
-현재 사실은 [구현 상태](docs/current-state.md), 최신 간편 화면은 [간편 프로젝트 검증](docs/validation/simple-project.md), 경로·연결 진단은 [프로젝트 연결 검증](docs/validation/project-connection.md), 공개 접수·자동 처리는 [기본 서비스 검증](docs/validation/basic-service.md), 이전 적용 보고·회복 검사는 [서비스 확인 검증](docs/validation/project-recovery.md)에서 확인하세요. 단순 프롬프트 대비 우위와 기억의 정확도·속도 향상은 아직 입증하지 않았습니다.
+현재 사실은 [구현 상태](docs/current-state.md), 최신 회귀와 Linux CI 차이는 [CI 재검증](docs/validation/ci-portability.md), 간편 화면은 [간편 프로젝트 검증](docs/validation/simple-project.md), 경로·연결 진단은 [프로젝트 연결 검증](docs/validation/project-connection.md), 공개 접수·자동 처리는 [기본 서비스 검증](docs/validation/basic-service.md), 이전 적용 보고·회복 검사는 [서비스 확인 검증](docs/validation/project-recovery.md)에서 확인하세요. 단순 프롬프트 대비 우위와 기억의 정확도·속도 향상은 아직 입증하지 않았습니다.
 
 ## 문서
 

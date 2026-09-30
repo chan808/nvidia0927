@@ -3,6 +3,7 @@ from copy import deepcopy
 import json
 from pathlib import Path
 import sqlite3
+import threading
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -142,6 +143,41 @@ def test_expired_lease_and_cancel_do_not_accept_late_results(remote):
     assert owner.request("GET", "/v1/jobs/" + job["job_id"])["state"] == "CANCEL_REQUESTED"
     api.request("POST", "/v1/runner/jobs/" + job["job_id"] + "/stopped", {"epoch": again["epoch"]})
     assert owner.request("GET", "/v1/jobs/" + job["job_id"])["state"] == "CANCELLED"
+
+
+@pytest.mark.parametrize("new_claim", [False, True])
+def test_old_renewal_failure_cannot_poison_new_claim(remote, monkeypatch, new_claim):
+    runner = remote[2]
+    old, current = {"job_id": "old", "epoch": 1}, {"job_id": "current", "epoch": 2}
+    runner.active = old
+    stop = threading.Event()
+
+    def request(method, path, payload=None, **kwargs):
+        if path == "/v1/runner/heartbeat":
+            return {}
+        assert path.endswith("/old/renew")
+        if new_claim:
+            runner.active = current
+        stop.set()
+        raise GatewayError("synthetic old lease expiry", 409)
+
+    monkeypatch.setattr(runner.api, "request", request)
+    runner._heartbeat_loop(stop)
+    assert runner.lease_failure == (None if new_claim else "GatewayError")
+
+
+def test_interrupted_run_releases_active_lease_before_retry(remote, monkeypatch):
+    runner = remote[2]
+    runner.active = {"job_id": "old", "epoch": 1}
+    monkeypatch.setattr(runner.api, "request", lambda *args, **kwargs: {})
+
+    def interrupted():
+        raise RuntimeError("synthetic result commit interruption")
+
+    monkeypatch.setattr(runner, "_run_once", interrupted)
+    with pytest.raises(RuntimeError, match="commit interruption"):
+        runner.run_once()
+    assert runner.active is None
 
 
 def test_model_gateway_caches_steps_and_refuses_unregistered_tools(remote):
