@@ -20,6 +20,8 @@ TOP_LEVEL = [
     ".streamlit/config.toml",
     "README.md",
     "app.py",
+    "review_app.py",
+    "requirements-review.txt",
     "nat_workflow.yml",
     "pyproject.toml",
     "requirements.txt",
@@ -60,7 +62,7 @@ def _safe_source(path: Path, root: Path) -> bool:
         and relative.parts[3] in {"local-gui", "basic-service", "project-connection"}
     )
     permitted_deploy = relative.parts[0] == "deploy" and (
-        path.name in {"Dockerfile", "Caddyfile", "Caddyfile.control-plane"}
+        path.name in {"Dockerfile", "Caddyfile", "Caddyfile.control-plane", "Caddyfile.pilot", "welcome.html"}
         or path.suffix.lower() in {".conf", ".template"})
     return (path.suffix.lower() in SOURCE_SUFFIXES or permitted_image or permitted_deploy) and not runtime_artifact(path, root)
 

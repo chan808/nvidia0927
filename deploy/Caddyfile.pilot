@@ -1,21 +1,16 @@
-{
-    email {$ACME_EMAIL}
-}
-
 {$TRACEBRIDGE_DOMAIN} {
     handle / {
         rewrite * /welcome
-        reverse_proxy control:8765
+        reverse_proxy guard:8080
     }
     handle /review/* {
-        reverse_proxy control:8765
+        reverse_proxy guard:8080
     }
     handle /report/* {
-        reverse_proxy control:8765
+        reverse_proxy guard:8080
     }
-    # API uses scoped bearer credentials; its pairing endpoint uses a one-use code.
     handle /v1/* {
-        reverse_proxy control:8765
+        reverse_proxy guard:8080
     }
     handle {
         basic_auth {

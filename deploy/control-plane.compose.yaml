@@ -39,6 +39,7 @@ services:
       options: {max-size: "10m", max-file: "3"}
   web:
     environment:
+      STREAMLIT_SERVER_BASE_URL_PATH: owner
       TRACEBRIDGE_CONTROL_URL: http://control:8765
       TRACEBRIDGE_OPERATOR_TOKEN_FILE: /app/output/control-plane/operator-token
   proxy:

@@ -375,5 +375,5 @@ def test_locked_direct_dependencies_match_installed_environment():
             if line and not line.startswith("#"):
                 requirement = Requirement(line)
                 assert str(requirement.specifier).startswith("==")
-                if validated_platform:
+                if validated_platform and "windows-py312" in file.name:
                     assert importlib.metadata.version(requirement.name) in requirement.specifier

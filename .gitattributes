@@ -3,3 +3,6 @@ examples/change_policy/*.json text eol=lf
 # Frozen evaluation hashes include the original CRLF bytes.
 examples/evaluation/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 examples/parallel_b/** text=auto eol=lf
+
+deploy/aws/*.sh text eol=lf
+deploy/aws/*.py text eol=lf

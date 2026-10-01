@@ -2,6 +2,7 @@
 # developer's .env, incident database, local profiles, or attached reports.
 **
 !pyproject.toml
+!requirements-linux-py312.lock
 !README.md
 !app.py
 !nat_workflow.yml
@@ -25,6 +26,13 @@
 !deploy/
 !deploy/Dockerfile
 !deploy/offline_smoke.py
+!deploy/service_smoke.py
+!deploy/*.yaml
+!deploy/Caddyfile*
+!deploy/nginx.pilot.conf
+!deploy/aws/
+!deploy/aws/*.sh
+!deploy/aws/prepare_runtime.py
 **/__pycache__
 **/__pycache__/**
 **/*.pyc

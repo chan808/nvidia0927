@@ -243,7 +243,7 @@ def create_app(db_path: str | Path, *, operator_token: str, model_client=None, n
             chunks.append(chunk)
         request._body = b"".join(chunks)
         response = await call_next(request)
-        if request.url.path.startswith(("/v1/public/", "/report/")):
+        if request.url.path.startswith(("/v1/public/", "/report/", "/review/", "/welcome")):
             response.headers["Cache-Control"] = "no-store"
             response.headers["Referrer-Policy"] = "no-referrer"
             response.headers["X-Content-Type-Options"] = "nosniff"
@@ -279,8 +279,10 @@ def create_app(db_path: str | Path, *, operator_token: str, model_client=None, n
             if not row or row["expires"] <= time.time():
                 raise HTTPException(401, "Pairing code expired or consumed")
             db.delete(tables.pairings, digest=_digest(body.code))
-            db.insert(tables.runners, id=runner_id, digest=_digest(token), projects=row["projects"], expires=time.time() + 30 * 86400, revoked=0, last_seen=time.time())
-        return {"runner_id": runner_id, "token": token, "project_ids": json.loads(row["projects"]), "expires_in_days": 30}
+            scoped_projects = json.loads(row["projects"])
+            days = 1 if all(re.fullmatch(r"review-[a-f0-9]{24}", item) for item in scoped_projects) else 30
+            db.insert(tables.runners, id=runner_id, digest=_digest(token), projects=row["projects"], expires=time.time() + days * 86400, revoked=0, last_seen=time.time())
+        return {"runner_id": runner_id, "token": token, "project_ids": scoped_projects, "expires_in_days": days}
 
     @app.delete("/v1/runners/{runner_id}", dependencies=[Depends(operator)])
     def revoke(runner_id: str):
@@ -921,6 +923,10 @@ def create_app(db_path: str | Path, *, operator_token: str, model_client=None, n
     install_routes(app, public_service, operator, runner, active)
     from .public_ui import install_public_page
     install_public_page(app)
+    from .reviewer import install_review_routes
+    install_review_routes(app, secret=operator_token, connect=connect, projects=projects,
+        report=report, changes=change, job_status=job_status, recovery=request_recovery,
+        report_type=ReportRequest, recovery_type=RecoveryRequest)
     return app
 
 

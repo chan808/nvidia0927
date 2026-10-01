@@ -6,6 +6,7 @@
 
 | 문서 | 내용 |
 | --- | --- |
+| [심사위원 체험](guides/reviewer-experience.md) | 로그인 없는 첫 화면, 브라우저 실행, PC 실행기·경로 등록·예제 수정·API 회복 |
 | [시작하기](guides/getting-started.md) | 지원 환경, 설치, 설정, 첫 화면 |
 | [간편 등록·글/사진 제보](guides/simple-project.md) | 한 화면의 프로젝트 등록·자동 로컬 연결·오른쪽 상태·제보·추가 설명 |
 | [사건 지식 검토·품질 비교](guides/knowledge-review.md) | 검토 대기열, 승인·제외, 합성 사례의 기억 끔/켬 답변 품질 비교 |

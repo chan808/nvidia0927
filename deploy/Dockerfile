@@ -20,19 +20,19 @@ RUN apt-get update \
     && groupadd --gid 10001 tracebridge \
     && useradd --uid 10001 --gid 10001 --no-create-home tracebridge
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md requirements-linux-py312.lock ./
 COPY tracebridge/ ./tracebridge/
 # The optional test dependency is needed by the existing fixture demo's
 # bounded reproduction commands; it is not the Windows test lock file.
-RUN python -m pip install --no-cache-dir ".[test,service,postgres]" \
+RUN python -m pip install --no-cache-dir -r requirements-linux-py312.lock ".[test,service,postgres]" \
     && python -m pip check \
     && python -c "import sqlite3; c=sqlite3.connect(':memory:'); c.execute('CREATE VIRTUAL TABLE check_fts USING fts5(body)'); import tracebridge.report_agent"
 
-COPY app.py nat_workflow.yml ./
+COPY app.py review_app.py requirements-review.txt nat_workflow.yml ./
 COPY .streamlit/config.toml ./.streamlit/config.toml
 COPY pages/ ./pages/
 COPY scripts/ ./scripts/
-COPY deploy/offline_smoke.py ./deploy/offline_smoke.py
+COPY deploy/ ./deploy/
 COPY examples/ ./examples/
 COPY skills/tracebridge-triage/ ./skills/tracebridge-triage/
 COPY tests/fixtures/agolive_repo/ ./tests/fixtures/agolive_repo/
@@ -43,6 +43,6 @@ RUN mkdir -p /app/output /app/generated \
 USER 10001:10001
 EXPOSE 8501
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3).read()"]
+    CMD ["python", "-c", "import os, urllib.request; p=os.getenv('STREAMLIT_SERVER_BASE_URL_PATH','').strip('/'); urllib.request.urlopen('http://127.0.0.1:8501/'+(p+'/' if p else '')+'_stcore/health', timeout=3).read()"]
 
 CMD ["python", "-m", "streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]
