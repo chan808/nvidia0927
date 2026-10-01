@@ -5,6 +5,8 @@
 !requirements-linux-py312.lock
 !README.md
 !app.py
+!review_app.py
+!requirements-review.txt
 !nat_workflow.yml
 !.streamlit/
 !.streamlit/config.toml
@@ -25,6 +27,7 @@
 !tests/fixtures/agolive_repo/**
 !deploy/
 !deploy/Dockerfile
+!deploy/welcome.html
 !deploy/offline_smoke.py
 !deploy/service_smoke.py
 !deploy/*.yaml
