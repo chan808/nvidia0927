@@ -11,7 +11,13 @@
 - 관련 프로젝트 등록·진단·실행기·AWS 검사 67개 통과. Windows 전체 초기 회귀는 763 통과·42 건너뛰기·1 실패였으며, 새 Linux 잠금 파일을 Windows 설치와 대조하던 검사였다. 해당 검사를 OS별 잠금 파일에 맞춰 수정했다. PostgreSQL과 실 Docker 실행은 로컬 초기 전체 실행에서 생략됐으며 배포 CI에서 확인한다.
 - 실제 브라우저에서 새 첫 화면과 실행 버튼을 확인하고 HTTP 500 → HTTP 200·검사 결과·적용 diff·회복 확인이 표시되는 것을 확인했다.
 
-개인 실행 결과는 `output/reviewer-tests-03.xml`, `output/reviewer-full-01.xml`, `output/reviewer-final-target.xml`, `output/reviewer-fresh-bundle/`에 둔다. 최종 Linux 회귀·Compose/TLS·실배포 결과는 배포 확인 후 기록한다.
+추가 관련 검사 29개를 통과했다. 배포 커밋 `bf715f86f002570e44c64f2bbcec323ba54363ea`의 [Linux 전체 회귀](https://github.com/chan808/nvidia0927/actions/runs/36874344295)는 **804개 통과·Windows 전용 2개 건너뛰기·실패/오류 0개**, 167.192초다. 실제 PostgreSQL/pgvector를 포함한다.
+
+[AWS 배포](https://github.com/chan808/nvidia0927/actions/runs/36874343793)는 이미지·의존성·씨드·전체 Compose·PostgreSQL·TLS·재시작 보존 검사를 통과하고 동일 커밋의 회귀 성공을 확인한 뒤 기존 서버를 업데이트했다. Compose의 TLS 경로에서도 실제 예제의 HTTP 500 → HTTP 200, 검사 `[1, 0, 0]`, 원본 적용과 `PASSED` 회복을 확인했다.
+
+공개 주소 [TraceBridge](https://tracebridge.ckswhd.shop/)에서 인증 없는 HTTP 200 첫 화면과 예제 성공 결과를 실제 브라우저로 확인했다. `/owner/`와 `/v1/projects`는 인증 없이 HTTP 401을 반환했다. 실제 ZIP 다운로드는 HTTP 200·281,362바이트였고 연결 주소가 공개 HTTPS 도메인이며 기존 비밀 파일·DB를 포함하지 않았다. 체험 권한으로 소유자 API에 접근하면 401이다.
+
+개인 실행 결과는 `output/reviewer-tests-03.xml`, `output/reviewer-full-01.xml`, `output/reviewer-final-target.xml`, `output/reviewer-fresh-bundle/`, `output/reviewer-ci-regression/`, `output/reviewer-ci-deployment/`, `output/reviewer-public-verification.json`에 둔다.
 
 ## 범위
 

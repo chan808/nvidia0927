@@ -1,6 +1,6 @@
 # 현재 구현 상태
 
-2026-10-01 심사 체험: 배포 루트의 로그인 없는 안내·실제 브라우저 예제 실행과 PC 실행기 ZIP, 바탕화면의 새 버그 예제·로컬 경로 등록·PC/서비스 상태·수정 전후 검사·diff 검토·적용·API 회복을 추가했다. 기존 소유자 화면은 `/owner/`에서 인증한다. 각 체험의 만료 권한과 프로젝트 범위를 분리하며 소유자 토큰을 내려받지 않는다. 기본 패치는 명시적 `DEMO_FIXED_PATCH`·모델 0회이고, 새 Windows 의존성 환경의 다운로드 체험을 끝까지 확인했다. [사용법](guides/reviewer-experience.md), [검증 범위](validation/reviewer-experience.md)를 확인한다.
+2026-10-01 심사 체험: [실제 배포 사이트](https://tracebridge.ckswhd.shop/)에 로그인 없는 안내·실제 브라우저 예제 실행과 PC 실행기 ZIP, 바탕화면의 새 버그 예제·로컬 경로 등록·PC/서비스 상태·수정 전후 검사·diff 검토·적용·API 회복을 반영했다. 기존 소유자 화면은 `/owner/`에서 인증한다. 각 체험의 만료 권한과 프로젝트 범위를 분리하며 소유자 토큰을 내려받지 않는다. 기본 패치는 명시적 `DEMO_FIXED_PATCH`·모델 0회이고, 새 Windows 의존성 환경의 다운로드 체험을 끝까지 확인했다. **Linux 전체 804개 통과·Windows 전용 2개 건너뛰기·실패/오류 0개**, 실제 PostgreSQL·Compose/TLS·공개 HTTPS·브라우저 예제 성공과 비인증 관리 접근 401을 확인했다. [사용법](guides/reviewer-experience.md), [검증 범위](validation/reviewer-experience.md)를 확인한다.
 
 2026-09-30 Linux CI 후속: 첫 두 GitHub 실행에서 Windows 전용 잠금 버전/개행 검사와 결과 중단 뒤 이전 임대 갱신의 경합을 발견해 수정했다. 마지막 실행의 실패가 새 작업을 중단시키지 않도록 활성 임대 소유권을 검사한다. **수정 후 로컬 전체 790개 통과(283.08초), 오류·실패·건너뛰기 0개**이며 실제 PostgreSQL을 포함한다. GitHub의 최종 실행 상태와 초기 실패 이력은 [CI 재검증](validation/ci-portability.md)에서 확인한다. 아래 787개는 이번 수정 이전의 검토·평가 기능 기록이다.
 
